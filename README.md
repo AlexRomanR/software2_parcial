@@ -28,11 +28,11 @@ Antes de clonar el proyecto, asegúrate de tener instalado:
 
 ----BASE DE DATOS-----
 
-0\. Instalar pgadmin 4(https://www.postgresql.org/ftp/pgadmin/pgadmin4/v9.8/windows/)
+0. Instalar pgadmin 4(https://www.postgresql.org/ftp/pgadmin/pgadmin4/v9.8/windows/)
 
 
 
-1\. descargar PostgreSQL version 17 o superior (https://www.enterprisedb.com/downloads/postgres-postgresql-downloads)
+1. descargar PostgreSQL version 17 o superior (https://www.enterprisedb.com/downloads/postgres-postgresql-downloads)
 
 Instalar y poner de contraseña openpg
 
@@ -40,7 +40,7 @@ Instalar y poner de contraseña openpg
 
 
 
-2\. Crear una base de datos en pgadmin 4 en la sección de PostgreSQL 17 llamada "software2\_DB"
+2. Crear una base de datos en pgadmin 4 en la sección de PostgreSQL 17 llamada "software2\_DB"
 
 
 
@@ -51,7 +51,6 @@ Instalar y poner de contraseña openpg
 
 
 -----CLONAR PROYECTO Y ARRANCAR-------
-
 1. Clonar el repositorio con "git clone https://github.com/AlexRomanR/software2\_parcial.git"
 2. Una vez clonado abrirlo con vs  code e ir a la terminar y poner:
     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
