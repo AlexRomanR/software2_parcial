@@ -19,9 +19,11 @@ from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include
-
+from accounts.views import dashboard_view
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("", dashboard_view, name="dashboard"),
+    path("accounts/", include("accounts.urls")),
 ]
 """
 URL configuration for Software2_BI project.
@@ -46,6 +48,6 @@ from django.conf.urls.static import static
 from django.urls import include
 
 urlpatterns = [
-    path('admin/', admin.site.urls),  # Admin de Django
-    path("ingestion/", include("ingestion.urls", namespace="ingestion")),  # Tu app
+    path('admin/', admin.site.urls), 
+    path("ingestion/", include("ingestion.urls", namespace="ingestion")), 
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
