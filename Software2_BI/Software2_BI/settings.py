@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "accounts", 
+    "widget_tweaks",
 ]
 
 MIDDLEWARE = [
@@ -58,6 +60,7 @@ TEMPLATES = [
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
+                "django.template.context_processors.debug",
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -77,9 +80,9 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'openpg', # Contraseña del usuario
+        'PASSWORD': '12345678', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'PORT': '5432',            # Puerto por defecto de PostgreSQL
     }
 }
 
@@ -125,3 +128,8 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+STATICFILES_DIRS = [BASE_DIR / "static"]
+
+LOGIN_URL = "login"
+LOGIN_REDIRECT_URL = "dashboard"     # cámbialo a donde quieras aterrizar
+LOGOUT_REDIRECT_URL = "login"
