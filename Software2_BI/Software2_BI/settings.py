@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,7 +38,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "fernet_fields",     # para cifrar credenciales
+    "ingestion",         # tu app de ingesta
 ]
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# Clave de cifrado (guárdala en variable de entorno)
+FERNET_KEYS = [os.environ.get("FERNET_KEY", "7JCjohc5fLJclS0PM4dE98mJne239a7yF8N0WUR7uxI=")]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

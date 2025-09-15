@@ -1,0 +1,10 @@
+<h2>Mis fuentes</h2>
+<ul>
+  {% for s in sources %}
+    <li>
+      {{ s.name }} — {{ s.kind }} — esquema: {{ s.internal_schema }} — tabla: {{ s.internal_table }}
+    </li>
+  {% empty %}
+    <li>Sin fuentes aún.</li>
+  {% endfor %}
+</ul>

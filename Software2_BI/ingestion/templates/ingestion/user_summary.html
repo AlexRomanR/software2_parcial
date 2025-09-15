@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Resumen de Datos</title>
+</head>
+<body>
+    <h1>Resumen de datos subidos por {{ request.user.username }}</h1>
+
+    {% for data in all_data %}
+        <h2>Archivo: {{ data.file }} (Schema: {{ data.schema }})</h2>
+        {% for table, info in data.tables.items %}
+            <h3>Tabla: {{ table }}</h3>
+            <p>Filas: {{ info.rows }}</p>
+            <p>Columnas: {{ info.columns|join:", " }}</p>
+
+{% if info.preview %}
+    <p><strong>Primeras filas:</strong></p>
+    <table border="1">
+        <thead>
+            <tr>
+                {% for col in info.columns %}
+                    <th>{{ col }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in info.preview %}
+                <tr>
+                    {% for val in row %}
+                        <td>{{ val }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endif %}
+
+        {% endfor %}
+        <hr>
+    {% empty %}
+        <p>No has subido ningún archivo aún.</p>
+    {% endfor %}
+</body>
+</html>
