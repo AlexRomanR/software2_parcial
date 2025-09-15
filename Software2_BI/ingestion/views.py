@@ -6,7 +6,9 @@ from .models import DataSource, UploadedDataset
 from .services import import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, get_schema_info
 import json
 import uuid
-
+from django.views.decorators.http import require_POST
+from django.shortcuts import get_object_or_404
+from django.db import connection
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -100,3 +102,22 @@ def user_data_summary_view(request):
             })
 
     return render(request, "ingestion/user_summary.html", {"all_data": all_data})
+
+
+@require_POST
+def delete_source(request, source_id):
+    # Obtenemos el dataset y su DataSource relacionado
+    dataset = get_object_or_404(UploadedDataset, id=source_id)
+    schema = dataset.source.internal_schema
+    table = dataset.source.internal_table
+
+    with connection.cursor() as cursor:
+        # 1) Borrar el esquema y su contenido
+        cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE;')
+
+        # 2) Borrar registros de las tablas asociadas a este dataset
+        cursor.execute("DELETE FROM ingestion_uploadeddataset WHERE id = %s;", [dataset.id])
+        cursor.execute("DELETE FROM ingestion_datasource WHERE id = %s;", [dataset.source.id])
+        cursor.execute("DELETE FROM ingestion_externalconnection WHERE source_id = %s;", [dataset.source.id])
+
+    return redirect("dashboard")  # Ajusta a la vista a la que quieras volver

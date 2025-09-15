@@ -5,7 +5,6 @@ from pathlib import Path
 from django.conf import settings
 from sqlalchemy import create_engine, text
 import chardet
-from mysql2postgresql import mysql2postgresql
 import sqlglot
 
 # Construye engine SQLAlchemy desde la BD por defecto de Django (PostgreSQL)

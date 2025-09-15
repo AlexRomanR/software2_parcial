@@ -1,10 +1,22 @@
-<h2>Mis fuentes</h2>
-<ul>
+{# accounts/templates/dashboard.html #}
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<ul class="list-group list-group-flush">
   {% for s in sources %}
-    <li>
-      {{ s.name }} — {{ s.kind }} — esquema: {{ s.internal_schema }} — tabla: {{ s.internal_table }}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        <strong>{{ s.name }}</strong> — {{ s.kind }}  
+        <br><small>Esquema: {{ s.internal_schema }} — Tabla: {{ s.internal_table }}</small>
+      </div>
+      <form method="post" action="{% url 'ingestion:delete_source' s.upload.id %}" onsubmit="return confirm('¿Seguro que quieres eliminar este archivo y sus datos?');">
+        {% csrf_token %}
+        <button class="btn btn-danger btn-sm">Eliminar</button>
+      </form>
     </li>
   {% empty %}
-    <li>Sin fuentes aún.</li>
+    <li class="list-group-item text-muted">Sin fuentes aún.</li>
   {% endfor %}
 </ul>
+
+{% endblock %}

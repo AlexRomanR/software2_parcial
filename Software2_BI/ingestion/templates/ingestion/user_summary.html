@@ -1,44 +1,48 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Resumen de Datos</title>
-</head>
-<body>
-    <h1>Resumen de datos subidos por {{ request.user.username }}</h1>
+{# accounts/templates/dashboard.html #}
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="main-card mb-3 card">
+  <div class="card-body">
+    <h2 class="card-title">Resumen de datos subidos por {{ request.user.username }}</h2>
 
     {% for data in all_data %}
-        <h2>Archivo: {{ data.file }} (Schema: {{ data.schema }})</h2>
-        {% for table, info in data.tables.items %}
-            <h3>Tabla: {{ table }}</h3>
-            <p>Filas: {{ info.rows }}</p>
-            <p>Columnas: {{ info.columns|join:", " }}</p>
+      <h4>Archivo: {{ data.file }} (Schema: {{ data.schema }})</h4>
+      {% for table, info in data.tables.items %}
+        <div class="mb-3">
+          <h5>Tabla: {{ table }}</h5>
+          <p><strong>Filas:</strong> {{ info.rows }}</p>
+          <p><strong>Columnas:</strong> {{ info.columns|join:", " }}</p>
 
-{% if info.preview %}
-    <p><strong>Primeras filas:</strong></p>
-    <table border="1">
-        <thead>
-            <tr>
-                {% for col in info.columns %}
-                    <th>{{ col }}</th>
-                {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in info.preview %}
-                <tr>
-                    {% for val in row %}
-                        <td>{{ val }}</td>
+          {% if info.preview %}
+            <p><strong>Primeras filas:</strong></p>
+            <div class="table-responsive">
+              <table class="table table-bordered table-sm">
+                <thead class="table-light">
+                  <tr>
+                    {% for col in info.columns %}
+                      <th>{{ col }}</th>
                     {% endfor %}
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-{% endif %}
-
-        {% endfor %}
-        <hr>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in info.preview %}
+                    <tr>
+                      {% for val in row %}
+                        <td>{{ val }}</td>
+                      {% endfor %}
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+      <hr>
     {% empty %}
-        <p>No has subido ningún archivo aún.</p>
+      <p class="text-muted">No has subido ningún archivo aún.</p>
     {% endfor %}
-</body>
-</html>
+  </div>
+</div>
+{% endblock %}
