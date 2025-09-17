@@ -13,6 +13,9 @@
         {% csrf_token %}
         <button class="btn btn-danger btn-sm">Eliminar</button>
       </form>
+      <a href="{% url 'ingestion:download_schema' s.upload.id %}" class="btn btn-secondary btn-sm">
+        Descargar Schema
+      </a>
     </li>
   {% empty %}
     <li class="list-group-item text-muted">Sin fuentes aún.</li>

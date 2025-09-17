@@ -9,6 +9,12 @@ import uuid
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404
 from django.db import connection
+from django.http import HttpResponse  
+from django.conf import settings
+import subprocess
+import tempfile
+from django.http import FileResponse
+import os
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -121,3 +127,35 @@ def delete_source(request, source_id):
         cursor.execute("DELETE FROM ingestion_externalconnection WHERE source_id = %s;", [dataset.source.id])
 
     return redirect("dashboard")  # Ajusta a la vista a la que quieras volver
+
+
+def download_schema(request, source_id):
+    dataset = get_object_or_404(UploadedDataset, id=source_id)
+    schema = dataset.source.internal_schema  # el schema del dataset
+
+    db = settings.DATABASES["default"]
+
+    # Crear archivo temporal
+    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".sql")
+    tmp_file.close()
+
+    # Comando pg_dump
+    cmd = [
+        "C:/Program Files/PostgreSQL/17/bin/pg_dump.exe",
+        "-h", db["HOST"],
+        "-p", str(db["PORT"]),
+        "-U", db["USER"],
+        "-d", db["NAME"],
+        "--no-owner",
+        "--schema", schema,
+        "-f", tmp_file.name
+    ]
+
+    env = os.environ.copy()
+    env["PGPASSWORD"] = db["PASSWORD"]
+
+    # Ejecutar pg_dump
+    subprocess.run(cmd, env=env, check=True)
+
+    # Devolver archivo como descarga
+    return FileResponse(open(tmp_file.name, "rb"), as_attachment=True, filename=f"{schema}.sql")
