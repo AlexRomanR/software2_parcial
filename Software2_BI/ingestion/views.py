@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.urls import reverse
 from .models import DataSource, UploadedDataset
-from .services import import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, get_schema_info
+from .services import import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, get_schema_info, generar_consulta_y_grafico
 import json
 import uuid
 from django.views.decorators.http import require_POST
@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 from django.http import FileResponse
 import os
+from sqlalchemy import text
+from .services import get_engine
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -159,3 +161,81 @@ def download_schema(request, source_id):
 
     # Devolver archivo como descarga
     return FileResponse(open(tmp_file.name, "rb"), as_attachment=True, filename=f"{schema}.sql")
+
+
+
+def prueba_view(request):
+    sql = None
+    grafico = None
+    datos = []
+
+    # 📌 Traer nombre de archivo + schema del usuario
+    user = request.user
+    sources = DataSource.objects.filter(owner=user).order_by("-created_at")
+
+    archivos = []
+    for src in sources:
+        if src.internal_schema:
+            archivos.append({
+                "file": src.name,       # nombre del archivo
+                "schema": src.internal_schema  # schema real en DB
+            })
+
+    if request.method == "POST":
+        schema_seleccionado = request.POST.get("schema")  # el schema real
+        pregunta = request.POST.get("pregunta")
+
+        # ✅ Obtener esquema de tablas para ese schema real
+        esquema = get_schema_info(schema_seleccionado)
+
+        # ✅ Generar SQL y tipo gráfico con Gemini
+        sql, grafico = generar_consulta_y_grafico(esquema, pregunta)
+
+        # ✅ Ejecutar SQL si existe
+        if sql:
+            with connection.cursor() as cursor:
+                cursor.execute(f"SET search_path TO {schema_seleccionado}")
+                cursor.execute(sql)
+                columnas = [col[0] for col in cursor.description]
+                datos = [dict(zip(columnas, fila)) for fila in cursor.fetchall()]
+
+    return render(request, "ingestion/prueba.html", {
+        "archivos": archivos,   # 📌 Enviamos la lista al template
+        "sql": sql,
+        "grafico": grafico,
+        "datos": datos
+    })
+
+
+
+def obtener_esquema_bd(schema_name):
+    """Obtiene tablas y columnas del esquema seleccionado"""
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s
+            ORDER BY table_name, ordinal_position
+        """, [schema_name])
+        filas = cursor.fetchall()
+
+    esquema = {}
+    for tabla, col in filas:
+        esquema.setdefault(tabla, []).append(col)
+
+    return esquema
+
+
+
+def dashboard(request):
+    engine = get_engine()
+    with engine.begin() as conn:
+        res = conn.execute(text("""
+            SELECT schema_name
+            FROM information_schema.schemata
+            WHERE schema_name LIKE 'user_%'
+            ORDER BY schema_name
+        """))
+        schemas = [r[0] for r in res.fetchall()]
+
+    return render(request, "dashboard.html", {"schemas": schemas})

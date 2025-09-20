@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Prueba Gemini{% endblock %}
+{% block content %}
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Prueba Gemini</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h2>Generar gráfico con IA</h2>
+
+  <form method="POST">
+    {% csrf_token %}
+  <label for="schema">Selecciona la base de datos:</label>
+  <select name="schema" id="schema" required>
+      {% for a in archivos %}
+      <option value="{{ a.schema }}">{{ a.file }} (Schema: {{ a.schema }})</option>
+      {% endfor %}
+  </select>
+
+
+
+
+    <input type="text" name="pregunta" placeholder="Ej: ventas de este año" required>
+    <button type="submit">Generar</button>
+  </form>
+
+  {% if sql %}
+    <h3>Consulta generada</h3>
+    <pre>{{ sql }}</pre>
+  {% endif %}
+
+  {% if datos %}
+    <h3>Gráfico ({{ grafico|default:"bar" }})</h3>
+
+    {{ datos|json_script:"chart-data" }}
+    {{ grafico|default:"bar"|json_script:"chart-type" }}
+
+    <canvas id="miGrafico"></canvas>
+
+    <script>
+    (function () {
+      const datosGrafico = JSON.parse(document.getElementById('chart-data').textContent);
+      const tipoGrafico  = JSON.parse(document.getElementById('chart-type').textContent);
+
+      const keys = Object.keys(datosGrafico[0] || {});
+      const etiquetas = datosGrafico.map(row => row[keys[0]]);
+      const valores   = datosGrafico.map(row => row[keys[1]]);
+
+      new Chart(document.getElementById('miGrafico'), {
+        type: tipoGrafico || 'bar',
+        data: {
+          labels: etiquetas,
+          datasets: [{
+            label: 'Resultados',
+            data: valores
+          }]
+        }
+      });
+    })();
+    </script>
+  {% endif %}
+</body>
+</html>
+{% endblock %}
