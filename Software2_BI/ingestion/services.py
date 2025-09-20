@@ -6,6 +6,11 @@ from django.conf import settings
 from sqlalchemy import create_engine, text
 import chardet
 import sqlglot
+import os
+import google.generativeai as genai
+from django.conf import settings
+import json
+
 
 # Construye engine SQLAlchemy desde la BD por defecto de Django (PostgreSQL)
 def get_engine():
@@ -363,3 +368,57 @@ def get_schema_info(schema: str, preview_rows: int = 5):
             }
 
     return info
+
+
+genai.configure(api_key=settings.GEMINI_API_KEY)
+
+def generar_consulta_y_grafico(esquema, pregunta_usuario):
+    """
+    Recibe esquema de BD + pregunta del usuario
+    Devuelve consulta SQL + tipo de gráfico sugerido
+    """
+    prompt = f"""
+    Eres un experto en SQL y visualización de datos.
+    El esquema de la BD es:
+    {esquema}
+
+    El usuario pregunta:
+    "{pregunta_usuario}"
+
+    Reglas:
+    0. Solo usa las columnas y tablas que existen en el esquema y si no encuentras una de la que quiere el usuario, intenta usar la más similar.
+    1. Si usas GROUP BY, cualquier otra columna debe usar funciones de agregación (SUM, COUNT, AVG, etc.).
+    2. La consulta debe ser válida para PostgreSQL.
+
+    Devuelve SOLO en formato JSON válido, sin texto extra:
+    {{
+      "sql": "SELECT ...",
+      "grafico": "bar | line | pie"
+    }}
+    Usa solo tablas y columnas del esquema.
+    """
+
+    print("===== PROMPT ENVIADO A GEMINI =====")
+    print(prompt)
+    print("===================================")
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    respuesta = model.generate_content(prompt)
+
+    print("===== RESPUESTA CRUDA DE GEMINI =====")
+    print(respuesta.text)
+    print("====================================")
+
+    try:
+        match = re.search(r"\{[\s\S]*\}", respuesta.text)
+        if match:
+            json_text = match.group(0)
+        else:
+            json_text = respuesta.text
+
+        datos = json.loads(json_text)
+        return datos.get("sql"), datos.get("grafico")
+
+    except Exception as e:
+        print("Error parseando respuesta:", e)
+        return None, None
