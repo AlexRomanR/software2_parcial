@@ -9,13 +9,32 @@
         <strong>{{ s.name }}</strong> — {{ s.kind }}  
         <br><small>Esquema: {{ s.internal_schema }} — Tabla: {{ s.internal_table }}</small>
       </div>
-      <form method="post" action="{% url 'ingestion:delete_source' s.upload.id %}" onsubmit="return confirm('¿Seguro que quieres eliminar este archivo y sus datos?');">
-        {% csrf_token %}
-        <button class="btn btn-danger btn-sm">Eliminar</button>
-      </form>
-      <a href="{% url 'ingestion:download_schema' s.upload.id %}" class="btn btn-secondary btn-sm">
-        Descargar Schema
-      </a>
+      
+      {# Grupo de botones - SOLO se agregó el botón Dashboard #}
+      <div class="btn-group" role="group">
+        {# NUEVO: Botón para ver dashboard del archivo #}
+        {% if s.has_dashboards %}
+          <a href="{% url 'ingestion:dashboard_detail' s.auto_dashboard.id %}" class="btn btn-primary btn-sm">
+            Ver Dashboard
+          </a>
+        {% else %}
+          <a href="{% url 'ingestion:data_explorer' s.id %}" class="btn btn-outline-primary btn-sm">
+            Crear Dashboard
+          </a>
+        {% endif %}
+        
+        {# Botones existentes (sin cambios) #}
+        <a href="{% url 'ingestion:download_schema' s.upload.id %}" class="btn btn-secondary btn-sm">
+          Descargar Schema
+        </a>
+        
+        <form method="post" action="{% url 'ingestion:delete_source' s.upload.id %}" 
+              onsubmit="return confirm('¿Seguro que quieres eliminar este archivo y sus datos?');" 
+              class="d-inline">
+          {% csrf_token %}
+          <button class="btn btn-danger btn-sm">Eliminar</button>
+        </form>
+      </div>
     </li>
   {% empty %}
     <li class="list-group-item text-muted">Sin fuentes aún.</li>

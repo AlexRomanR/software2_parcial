@@ -1,0 +1,179 @@
+{% load static %}
+<!doctype html><html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ dash.name }} - Dashboard</title>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="{% static 'css/custom.css' %}">
+  <style>
+    .grid{display:grid;gap:1rem;grid-template-columns:repeat(12,1fr)}
+    .col-12{grid-column:span 12}.col-6{grid-column:span 6}.col-4{grid-column:span 4}.col-3{grid-column:span 3}
+    .card{padding:1rem;background:#111;border:1px solid #333;border-radius:12px;color:#fff}
+    .kpi{font-size:1.6rem;font-weight:600}
+    canvas{width:100%;height:360px}
+    .toolbar{display:flex;gap:.5rem;align-items:center;margin:.5rem 0 1rem;flex-wrap:wrap}
+    .btn{padding:.5rem .8rem;background:#1e293b;color:#fff;border-radius:8px;border:1px solid #334155;cursor:pointer;text-decoration:none}
+    .btn:hover{background:#334155}
+    .btn-secondary{background:#6b7280}
+    .btn-success{background:#059669}
+    .dashboard-header{background:linear-gradient(135deg, #1e293b 0%, #334155 100%);color:#fff;padding:1.5rem;border-radius:12px;margin-bottom:1rem}
+    .file-info{background:#1f2937;padding:1rem;border-radius:8px;margin-bottom:1rem;color:#d1d5db}
+    .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1rem;margin-top:1rem}
+    .stat-item{text-align:center;padding:0.5rem}
+    .stat-number{font-size:1.25rem;font-weight:600;color:#60a5fa}
+    .stat-label{font-size:0.875rem;color:#9ca3af}
+  </style>
+</head>
+<body>
+  <div class="dashboard-header">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h1 style="margin:0;font-size:2rem">{{ dash.name }}</h1>
+        <p style="margin:0.5rem 0 0 0;opacity:0.8">{{ dash.description|default:"Dashboard de inteligencia de negocios" }}</p>
+      </div>
+      <div>
+        <a href="{% url 'ingestion:dashboard_list' %}" class="btn btn-secondary">← Volver</a>
+        {% if data_source %}
+          <a href="{% url 'ingestion:data_explorer' data_source.id %}" class="btn btn-secondary">Explorar datos</a>
+          <a href="{% url 'ingestion:create_dashboard' data_source.id %}" class="btn btn-success">+ Nuevo dashboard</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {% if data_source %}
+  <div class="file-info">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0;color:#f3f4f6">📄 {{ data_source.name }}</h3>
+        <p style="margin:0.25rem 0 0 0">Tipo: {{ data_source.kind }} | Esquema: {{ data_source.internal_schema }}</p>
+      </div>
+      <div class="stats-grid">
+        {% if data_source.upload %}
+        <div class="stat-item">
+          <div class="stat-number">{{ data_source.upload.rows_ingested|default:0 }}</div>
+          <div class="stat-label">Filas</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">{{ data_source.upload.columns|length|default:0 }}</div>
+          <div class="stat-label">Columnas</div>
+        </div>
+        {% endif %}
+        <div class="stat-item">
+          <div class="stat-number">{{ dash.widget_count }}</div>
+          <div class="stat-label">Gráficos</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-number">{{ dash.kpi_count }}</div>
+          <div class="stat-label">KPIs</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="toolbar" id="filters">
+    {% if has_date_columns %}
+    <label style="color:#d1d5db">Desde:</label>
+    <input type="date" name="desde" style="padding:0.5rem;border-radius:4px;border:1px solid #4b5563;background:#1f2937;color:#fff">
+    <label style="color:#d1d5db">Hasta:</label>
+    <input type="date" name="hasta" style="padding:0.5rem;border-radius:4px;border:1px solid #4b5563;background:#1f2937;color:#fff">
+    {% endif %}
+    <label style="color:#d1d5db">Filtro:</label>
+    <input type="text" name="cond" placeholder="ej: categoria = 'Electrónica'" style="padding:0.5rem;border-radius:4px;border:1px solid #4b5563;background:#1f2937;color:#fff;min-width:200px">
+    <button class="btn"
+      hx-get
+      hx-trigger="click"
+      hx-target=".htmx-zone"
+      hx-swap="outerHTML"
+      hx-select=".htmx-zone"
+      hx-include="#filters">Aplicar filtros</button>
+    <a class="btn btn-secondary" href="{% url 'ingestion:export_csv' dash.id %}" onclick="this.href=this.href + buildQS()">📊 Exportar CSV</a>
+  </div>
+
+  <div class="grid">
+    {# KPIs - Una fila completa #}
+    {% for k in dash.kpis.all %}
+      <div class="col-3 htmx-zone"
+           hx-get="{% url 'ingestion:kpi_partial' k.id %}"
+           hx-trigger="load from:#filters changed delay:200ms"
+           hx-include="#filters">
+        <div class="card">
+          <div style="text-align:center;padding:1rem">
+            <div class="kpi">⏳</div>
+            <div style="opacity:0.7;margin-top:0.5rem">Cargando...</div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+
+    {# Widgets - Gráficos flexibles #}
+    {% for w in dash.widgets.all %}
+      <div class="col-{{ w.width|default:6 }} htmx-zone"
+           hx-get="{% url 'ingestion:widget_partial' w.id %}"
+           hx-trigger="load from:#filters changed delay:200ms"
+           hx-include="#filters">
+        <div class="card" style="min-height:{{ w.height|default:400 }}px">
+          <div style="text-align:center;padding:2rem;color:#9ca3af">
+            <div style="font-size:3rem;margin-bottom:1rem">📈</div>
+            <div>Cargando {{ w.title }}...</div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+
+    {# Tabla de datos #}
+    <div class="col-12 htmx-zone"
+         hx-get="{% url 'ingestion:table_partial' dash.id %}"
+         hx-trigger="load from:#filters changed delay:200ms"
+         hx-include="#filters">
+      <div class="card">
+        <div style="text-align:center;padding:2rem;color:#9ca3af">
+          <div style="font-size:3rem;margin-bottom:1rem">📋</div>
+          <div>Cargando tabla de datos...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Estado vacío si no hay widgets ni KPIs #}
+  {% if not dash.widgets.all and not dash.kpis.all %}
+  <div class="card" style="text-align:center;padding:3rem">
+    <h3 style="color:#9ca3af;margin-bottom:1rem">Dashboard vacío</h3>
+    <p style="color:#6b7280;margin-bottom:2rem">Este dashboard no tiene gráficos ni KPIs configurados.</p>
+    {% if data_source %}
+      <div>
+        <a href="{% url 'ingestion:data_explorer' data_source.id %}" class="btn btn-success">Explorar datos y crear gráficos</a>
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+<script>
+function buildQS(){
+  const f=document.getElementById("filters"); 
+  const p=new URLSearchParams();
+  for(const el of f.querySelectorAll("input")) {
+    if(el.value) p.set(el.name, el.value);
+  }
+  return "?"+p.toString();
+}
+
+// Mejorar experiencia de carga
+document.addEventListener('htmx:beforeRequest', function(evt) {
+  const target = evt.target;
+  if(target.classList.contains('htmx-zone')) {
+    target.style.opacity = '0.6';
+  }
+});
+
+document.addEventListener('htmx:afterRequest', function(evt) {
+  const target = evt.target;
+  if(target.classList.contains('htmx-zone')) {
+    target.style.opacity = '1';
+  }
+});
+</script>
+</body>
+</html>

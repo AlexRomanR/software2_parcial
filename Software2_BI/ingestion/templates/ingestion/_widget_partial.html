@@ -1,0 +1,154 @@
+<div class="dashboard-card chart-container">
+  <div class="chart-header">
+    <div>
+      <h3 class="chart-title">{{ w.title }}</h3>
+      <p class="chart-subtitle">{{ w.chart_type|title }}</p>
+    </div>
+    <div class="dashboard-badge dashboard-badge-info">
+      {{ labels|length }} elemento{{ labels|length|pluralize }}
+    </div>
+  </div>
+  
+  <div style="position: relative; height: {{ w.height|default:400 }}px;">
+    <canvas id="chart-{{ w.id }}" class="chart-canvas"></canvas>
+  </div>
+</div>
+
+<script>
+(function(){
+  const ctx = document.getElementById('chart-{{ w.id }}').getContext('2d');
+  
+  // Configuración de colores basada en el esquema del widget
+  const colors = {{ chart_colors|safe }};
+  
+  // Datos del gráfico
+  const chartData = {
+    labels: {{ labels|safe }},
+    datasets: {{ datasets|safe }}
+  };
+  
+  // Configuración específica por tipo de gráfico
+  const chartConfig = {
+    type: "{{ w.chart_type|default:'bar' }}",
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: {
+            usePointStyle: true,
+            padding: 20,
+            font: {
+              size: 12
+            }
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#333',
+          borderWidth: 1,
+          cornerRadius: 8,
+          displayColors: true
+        }
+      },
+      interaction: {
+        intersect: false,
+        mode: 'index'
+      }
+    }
+  };
+  
+  // Configuraciones específicas por tipo
+  {% if w.chart_type == 'line' or w.chart_type == 'area' %}
+  chartConfig.options.scales = {
+    x: {
+      grid: {
+        display: true,
+        color: 'rgba(0, 0, 0, 0.1)'
+      },
+      ticks: {
+        maxTicksLimit: 10
+      }
+    },
+    y: {
+      beginAtZero: true,
+      grid: {
+        display: true,
+        color: 'rgba(0, 0, 0, 0.1)'
+      }
+    }
+  };
+  
+  // Para gráficos de área
+  {% if w.chart_type == 'area' %}
+  chartConfig.type = 'line';
+  chartData.datasets.forEach(dataset => {
+    dataset.fill = true;
+    dataset.backgroundColor = dataset.backgroundColor || colors[0] + '40';
+  });
+  {% endif %}
+  
+  {% elif w.chart_type == 'bar' %}
+  chartConfig.options.scales = {
+    x: {
+      grid: {
+        display: false
+      }
+    },
+    y: {
+      beginAtZero: true,
+      grid: {
+        display: true,
+        color: 'rgba(0, 0, 0, 0.1)'
+      }
+    }
+  };
+  
+  {% elif w.chart_type == 'pie' or w.chart_type == 'doughnut' %}
+  chartConfig.options.plugins.legend.position = 'right';
+  chartConfig.options.cutout = {% if w.chart_type == 'doughnut' %}'60%'{% else %}'0%'{% endif %};
+  
+  // Para gráficos circulares, usar colores diferentes para cada segmento
+  if (chartData.datasets.length > 0) {
+    chartData.datasets[0].backgroundColor = colors.slice(0, chartData.labels.length);
+    chartData.datasets[0].borderColor = '#fff';
+    chartData.datasets[0].borderWidth = 2;
+  }
+  
+  {% elif w.chart_type == 'scatter' %}
+  chartConfig.options.scales = {
+    x: {
+      type: 'linear',
+      position: 'bottom',
+      grid: {
+        display: true,
+        color: 'rgba(0, 0, 0, 0.1)'
+      }
+    },
+    y: {
+      grid: {
+        display: true,
+        color: 'rgba(0, 0, 0, 0.1)'
+      }
+    }
+  };
+  
+  {% elif w.chart_type == 'radar' %}
+  chartConfig.options.scales = {
+    r: {
+      beginAtZero: true,
+      grid: {
+        color: 'rgba(0, 0, 0, 0.1)'
+      }
+    }
+  };
+  {% endif %}
+  
+  // Crear el gráfico
+  new Chart(ctx, chartConfig);
+})();
+</script>

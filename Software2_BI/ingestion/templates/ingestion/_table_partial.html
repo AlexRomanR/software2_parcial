@@ -1,0 +1,28 @@
+<div class="card">
+  <h3 style="margin:0 0 .5rem 0;">Detalle</h3>
+  <div style="overflow:auto;">
+    <table>
+      <thead>
+        <tr>
+          {% if page_obj.object_list %}
+            {% for k in page_obj.object_list.0.keys %}<th>{{ k }}</th>{% endfor %}
+          {% else %}<th>Sin datos</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in page_obj.object_list %}
+          <tr>{% for v in r.values %}<td>{{ v }}</td>{% endfor %}</tr>
+        {% empty %}<tr><td>No hay filas</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:.5rem;display:flex;gap:.5rem;">
+    {% if page_obj.has_previous %}
+      <button class="btn" hx-get="?page={{ page_obj.previous_page_number }}" hx-target="closest .card" hx-swap="outerHTML" hx-include="#filters">Anterior</button>
+    {% endif %}
+    <div>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</div>
+    {% if page_obj.has_next %}
+      <button class="btn" hx-get="?page={{ page_obj.next_page_number }}" hx-target="closest .card" hx-swap="outerHTML" hx-include="#filters">Siguiente</button>
+    {% endif %}
+  </div>
+</div>

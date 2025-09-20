@@ -1,0 +1,132 @@
+{% load static %}
+<!doctype html><html>
+<head>
+  <meta charset="utf-8">
+  <title>Mis Dashboards</title>
+  <link rel="stylesheet" href="{% static 'css/custom.css' %}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .dashboard-card {
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      background: #f8f9fa;
+    }
+    .file-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 0.75rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 0.5rem;
+    }
+    .dashboard-item {
+      background: white;
+      border: 1px solid #e9ecef;
+      border-radius: 4px;
+      padding: 0.75rem;
+      margin: 0.25rem 0;
+    }
+    .stats-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1>Mis Dashboards</h1>
+      <a href="{% url 'ingestion:list' %}" class="btn btn-outline-primary">Ver archivos</a>
+    </div>
+
+    {# Dashboards agrupados por archivo #}
+    {% if sources_with_dashboards %}
+      <h3>Dashboards por archivo</h3>
+      {% for source in sources_with_dashboards %}
+        <div class="dashboard-card">
+          <div class="file-header">
+            <div class="d-flex justify-content-between align-items-center">
+              <div>
+                <h5 class="mb-0">{{ source.name }}</h5>
+                <small>{{ source.kind }} - {{ source.upload.rows_ingested|default:0 }} filas</small>
+              </div>
+              <span class="badge bg-light text-dark">{{ source.dashboards.count }} dashboard{{ source.dashboards.count|pluralize }}</span>
+            </div>
+          </div>
+          
+          {% for dashboard in source.dashboards.all %}
+            <div class="dashboard-item">
+              <div class="d-flex justify-content-between align-items-center">
+                <div>
+                  <h6 class="mb-1">
+                    <a href="{% url 'ingestion:dashboard_detail' dashboard.id %}" class="text-decoration-none">
+                      {{ dashboard.name }}
+                    </a>
+                    {% if dashboard.is_auto_generated %}
+                      <span class="badge bg-info stats-badge">Automático</span>
+                    {% endif %}
+                  </h6>
+                  <small class="text-muted">{{ dashboard.description|default:"Sin descripción" }}</small>
+                </div>
+                <div class="text-end">
+                  <span class="badge bg-secondary stats-badge">{{ dashboard.widget_count }} gráficos</span>
+                  <span class="badge bg-primary stats-badge">{{ dashboard.kpi_count }} KPIs</span>
+                  <br>
+                  <small class="text-muted">{{ dashboard.created_at|date:"d/m/Y" }}</small>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+          
+          {# Opción para crear dashboard adicional #}
+          <div class="mt-2">
+            <a href="{% url 'ingestion:create_dashboard' source.id %}" class="btn btn-outline-primary btn-sm">
+              + Crear dashboard personalizado
+            </a>
+            <a href="{% url 'ingestion:data_explorer' source.id %}" class="btn btn-outline-info btn-sm">
+              Explorar datos
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {# Dashboards personalizados (sin archivo) #}
+    {% if custom_dashboards %}
+      <h3 class="mt-4">Dashboards personalizados</h3>
+      {% for dashboard in custom_dashboards %}
+        <div class="dashboard-item">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <h6 class="mb-1">
+                <a href="{% url 'ingestion:dashboard_detail' dashboard.id %}" class="text-decoration-none">
+                  {{ dashboard.name }}
+                </a>
+              </h6>
+              <small class="text-muted">{{ dashboard.description|default:"Sin descripción" }}</small>
+            </div>
+            <div class="text-end">
+              <span class="badge bg-secondary stats-badge">{{ dashboard.widget_count }} gráficos</span>
+              <span class="badge bg-primary stats-badge">{{ dashboard.kpi_count }} KPIs</span>
+              <br>
+              <small class="text-muted">{{ dashboard.created_at|date:"d/m/Y" }}</small>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {# Estado vacío #}
+    {% if not sources_with_dashboards and not custom_dashboards %}
+      <div class="text-center py-5">
+        <h4 class="text-muted">No tienes dashboards aún</h4>
+        <p class="text-muted">Sube un archivo para generar automáticamente un dashboard</p>
+        <a href="{% url 'ingestion:upload' %}" class="btn btn-primary">Subir archivo</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

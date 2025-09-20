@@ -18,6 +18,10 @@
         <a href="http://127.0.0.1:8000/ingestion/summary/" class="btn btn-info btn-lg w-100">
           Datos de los archivos subidos
         </a>
+                {# NUEVO: botón a dashboards interactivos #}
+        <a href="{% url 'ingestion:dashboard_list' %}" class="btn btn-warning btn-lg w-100">
+          Dashboards interactivos
+        </a>
       </div>
     </div>
   </div>

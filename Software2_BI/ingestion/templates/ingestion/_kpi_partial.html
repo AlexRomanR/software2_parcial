@@ -1,0 +1,26 @@
+<div class="kpi-card kpi-{{ k.color|default:'primary' }}">
+  {% if k.icon %}
+    <div class="kpi-icon">
+      <i class="{{ k.icon }}"></i>
+    </div>
+  {% endif %}
+  
+  <div class="kpi-title">{{ k.title }}</div>
+  
+  <div class="kpi-value">
+    {{ value|default:"—" }}
+    {% if k.suffix and value %}
+      <span class="kpi-suffix">{{ k.suffix }}</span>
+    {% endif %}
+  </div>
+  
+  {% if value %}
+    <div style="font-size: 0.8rem; opacity: 0.8; margin-top: 0.5rem;">
+      Actualizado
+    </div>
+  {% else %}
+    <div style="font-size: 0.8rem; opacity: 0.8; margin-top: 0.5rem;">
+      Sin datos
+    </div>
+  {% endif %}
+</div>
