@@ -17,6 +17,10 @@ from django.http import FileResponse
 import os
 from sqlalchemy import text
 from .services import get_engine
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.core.serializers.json import DjangoJSONEncoder
+from .services import get_schema_info, generar_consulta_y_grafico, reduce_schema
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -239,3 +243,46 @@ def dashboard(request):
         schemas = [r[0] for r in res.fetchall()]
 
     return render(request, "dashboard.html", {"schemas": schemas})
+
+@csrf_exempt
+def prueba_chat_view(request):
+    if request.method != "POST":
+        user = request.user
+        sources = DataSource.objects.filter(owner=user).order_by("-created_at")
+        archivos = [{"file": s.name, "schema": s.internal_schema} for s in sources if s.internal_schema]
+        from django.shortcuts import render
+        return render(request, "ingestion/prueba.html", {"archivos": archivos})
+
+    body = json.loads(request.body or "{}")
+    schema = body.get("schema")
+    mensaje = body.get("mensaje", "").strip()
+
+    esquema_full = get_schema_info(schema)         # trae columns/rows/preview...
+    esquema_reducido = reduce_schema(esquema_full) # SOLO {tabla: [columnas]}
+
+    sql, grafico, respuesta = generar_consulta_y_grafico(esquema_reducido, mensaje)
+
+    columns, datos, error = [], [], None
+    if sql and schema:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f'SET search_path TO "{schema}"')
+                cursor.execute(sql)
+                columns = [c[0] for c in cursor.description] if cursor.description else []
+                rows = cursor.fetchall()
+                datos = [list(r) for r in rows]
+        except Exception as e:
+            error = str(e)
+
+    return JsonResponse(
+        {
+            "respuesta": respuesta or "",
+            "sql": sql or "",
+            "grafico": grafico or "bar",
+            "columns": columns,
+            "datos": datos,
+            "error": error,
+        },
+        encoder=DjangoJSONEncoder,
+        json_dumps_params={"ensure_ascii": False}
+    )

@@ -1,66 +1,117 @@
 {% extends "base.html" %}
-{% block title %}Prueba Gemini{% endblock %}
+{% block title %}Prueba Gemini Chat{% endblock %}
 {% block content %}
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Prueba Gemini</title>
+  <title>Chat con IA</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    #chat-box { border:1px solid #ccc; height:300px; overflow-y:auto; padding:10px; margin-bottom:10px; background:#f9f9f9; }
+    .msg-user { color: #2563eb; margin: 5px 0; } /* azul */
+    .msg-bot  { color: #059669; margin: 5px 0; } /* verde */
+    .msg-err  { color: #dc2626; margin: 5px 0; } /* rojo */
+  </style>
 </head>
 <body>
   <h2>Generar gráfico con IA</h2>
 
-  <form method="POST">
-    {% csrf_token %}
   <label for="schema">Selecciona la base de datos:</label>
-  <select name="schema" id="schema" required>
+  <select id="schema" required>
       {% for a in archivos %}
-      <option value="{{ a.schema }}">{{ a.file }} (Schema: {{ a.schema }})</option>
+      <option value="{{ a.schema }}">{{ a.file }}</option>
       {% endfor %}
   </select>
 
+  <div id="chat-box"></div>
 
+  <input type="text" id="user-input" placeholder="Escribe tu mensaje..." />
+  <button id="send-btn">Enviar</button>
 
-
-    <input type="text" name="pregunta" placeholder="Ej: ventas de este año" required>
-    <button type="submit">Generar</button>
-  </form>
-
-  {% if sql %}
-    <h3>Consulta generada</h3>
-    <pre>{{ sql }}</pre>
-  {% endif %}
-
-  {% if datos %}
-    <h3>Gráfico ({{ grafico|default:"bar" }})</h3>
-
-    {{ datos|json_script:"chart-data" }}
-    {{ grafico|default:"bar"|json_script:"chart-type" }}
-
+  <div id="grafico-container" style="margin-top:20px;">
     <canvas id="miGrafico"></canvas>
+  </div>
 
-    <script>
-    (function () {
-      const datosGrafico = JSON.parse(document.getElementById('chart-data').textContent);
-      const tipoGrafico  = JSON.parse(document.getElementById('chart-type').textContent);
+<script>
+  const chatBox = document.getElementById("chat-box");
+  const userInput = document.getElementById("user-input");
+  const sendBtn = document.getElementById("send-btn");
+  const schemaSelect = document.getElementById("schema");
+  let chartInstance = null;
 
-      const keys = Object.keys(datosGrafico[0] || {});
-      const etiquetas = datosGrafico.map(row => row[keys[0]]);
-      const valores   = datosGrafico.map(row => row[keys[1]]);
+  function addMessage(type, text) {
+    const p = document.createElement("p");
+    p.className = type === "user" ? "msg-user" : (type === "bot" ? "msg-bot" : "msg-err");
+    p.textContent = (type === "user" ? "Tú: " : type === "bot" ? "IA: " : "Error: ") + text;
+    chatBox.appendChild(p);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
 
-      new Chart(document.getElementById('miGrafico'), {
-        type: tipoGrafico || 'bar',
-        data: {
-          labels: etiquetas,
-          datasets: [{
-            label: 'Resultados',
-            data: valores
-          }]
-        }
-      });
-    })();
-    </script>
-  {% endif %}
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+
+  function renderChart(datos, tipo, columns) {
+    if (!datos || !datos.length || !columns || columns.length < 2) {
+      addMessage("err", "No hay datos suficientes para graficar.");
+      return;
+    }
+
+    // columnas: ["categoria", "valor", ...]
+    const [catKey, valKey] = columns;
+
+    // datos: [["A", 10], ["B", 20], ...]
+    const etiquetas = datos.map(row => row[0]);
+    const valores   = datos.map(row => row[1]);
+
+    if (chartInstance) chartInstance.destroy();
+    const ctx = document.getElementById('miGrafico');
+
+    chartInstance = new Chart(ctx, {
+      type: tipo || 'bar',
+      data: {
+        labels: etiquetas,
+        datasets: [{
+          label: valKey || 'Resultados',
+          data: valores
+        }]
+      }
+    });
+  }
+
+  sendBtn.addEventListener("click", () => {
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    const schema = schemaSelect.value;
+    addMessage("user", text);
+    userInput.value = "";
+
+    fetch("{% url 'ingestion:prueba_chat' %}", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: JSON.stringify({ schema: schema, mensaje: text })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) addMessage("err", data.error);
+      if (data.respuesta) addMessage("bot", data.respuesta);
+      if (data.sql) addMessage("bot", "SQL generado: " + data.sql);
+
+      // 👇 Parámetros en el orden correcto
+      if (data.columns && data.datos && data.datos.length > 0) {
+        renderChart(data.datos, data.grafico, data.columns);
+      }
+    })
+    .catch(err => addMessage("err", String(err)));
+  });
+</script>
+
 </body>
 </html>
 {% endblock %}
