@@ -34,6 +34,10 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
+from django.utils import encoding as _enc
+if not hasattr(_enc, "force_text"):
+    _enc.force_text = _enc.force_str
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -67,7 +71,7 @@ ROOT_URLCONF = 'Software2_BI.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        "DIRS": [BASE_DIR / "templates"],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -93,7 +97,7 @@ DATABASES = {
         'USER': 'postgres',        # Usuario de tu PostgreSQL
         'PASSWORD': 'openpg', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'PORT': '5432',            # Puerto por defecto de PostgreSQL
     }
 }
 
