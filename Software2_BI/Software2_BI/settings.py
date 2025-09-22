@@ -26,10 +26,10 @@ SECRET_KEY = 'django-insecure-6pylp6ufnzjo$-3rk1-6(m=!s=of^-4kuz2j9_t@$kfx=_sra$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBlTTrJVms7u1AbkNsWogoiQgkLVDIxSbs")
-
-ALLOWED_HOSTS = []
+# Gemini API Key (hardcoded para MVP local)
+GEMINI_API_KEY = "AIzaSyBlTTrJVms7u1AbkNsWogoiQgkLVDIxSbs"
 
 
 # Application definition
@@ -55,8 +55,8 @@ INSTALLED_APPS = [
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# Clave de cifrado (guárdala en variable de entorno)
-FERNET_KEYS = [os.environ.get("FERNET_KEY", "7JCjohc5fLJclS0PM4dE98mJne239a7yF8N0WUR7uxI=")]
+# Clave de cifrado (hardcoded para MVP local)
+FERNET_KEYS = ["7JCjohc5fLJclS0PM4dE98mJne239a7yF8N0WUR7uxI="]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -97,9 +97,9 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'openpg', # Contraseña del usuario
+        'PASSWORD': '456852', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'PORT': '5432',            # Puerto por defecto de PostgreSQL
     }
 }
 
@@ -159,6 +159,8 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'solizfarydmarquez@gmail.com'
 EMAIL_HOST_PASSWORD = 'kxbodoimtkqrncdi'
+
+# Gemini API Key ya definida arriba
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Límites aumentados para PDFs grandes
