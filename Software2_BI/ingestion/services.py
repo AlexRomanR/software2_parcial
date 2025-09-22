@@ -372,53 +372,108 @@ def get_schema_info(schema: str, preview_rows: int = 5):
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 
-def generar_consulta_y_grafico(esquema, pregunta_usuario):
+
+def reduce_schema(esquema_full: dict) -> dict[str, list[str]]:
     """
-    Recibe esquema de BD + pregunta del usuario
-    Devuelve consulta SQL + tipo de gráfico sugerido
+    Recibe el dict de get_schema_info({table: {columns, rows, preview}}) y
+    devuelve solo {table: [col1, col2, ...]} con strings.
     """
+    reducido = {}
+    for tbl, info in (esquema_full or {}).items():
+        cols = []
+        if isinstance(info, dict) and "columns" in info:
+            cols = info["columns"]
+        elif isinstance(info, (list, tuple)):  # por si ya viene reducido
+            cols = info
+        reducido[str(tbl)] = [str(c) for c in (cols or [])]
+    return reducido
+
+def _extract_json_block(text: str) -> str | None:
+    if not text:
+        return None
+    m = re.search(r"```json\s*(\{[\s\S]*?\})\s*```", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    s = text.find("{")
+    if s == -1:
+        return None
+    depth = 0
+    for i in range(s, len(text)):
+        ch = text[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[s:i+1].strip()
+    return None
+
+def generar_consulta_y_grafico(esquema_reducido: dict, mensaje_usuario: str):
+    # 🔒 Defensa: asegurar que lo que mandamos es reducido y serializable
+    esquema_reducido = reduce_schema(esquema_reducido)
+
+    if not mensaje_usuario or mensaje_usuario.strip().lower() in {"hola", "buenas", "hello", "hey"}:
+        ejemplos = []
+        for tabla, columnas in esquema_reducido.items():
+            if len(columnas) >= 2:
+                ejemplos.append(f"Total de {columnas[1]} por {columnas[0]} en la tabla {tabla}")
+            elif len(columnas) == 1:
+                ejemplos.append(f"Conteo de {columnas[0]} en la tabla {tabla}")
+            # solo 2 ejemplos para no saturar
+            if len(ejemplos) >= 2:
+                break
+
+        ejemplos_texto = " o ".join([f"“{e}”" for e in ejemplos]) if ejemplos else "“Conteo de registros por categoría”"
+        return (None, None, f"¡Hola! Dime qué quieres ver. Por ejemplo: {ejemplos_texto}.")
+
     prompt = f"""
-    Eres un experto en SQL y visualización de datos.
-    El esquema de la BD es:
-    {esquema}
+Eres un asistente que genera SQL para PostgreSQL y sugiere un tipo de gráfico.
 
-    El usuario pregunta:
-    "{pregunta_usuario}"
+ESQUEMA (resumido: {{tabla: [columnas...]}}):
+{json.dumps(esquema_reducido, ensure_ascii=False)}
 
-    Reglas:
-    0. Solo usa las columnas y tablas que existen en el esquema y si no encuentras una de la que quiere el usuario, intenta usar la más similar.
-    1. Si usas GROUP BY, cualquier otra columna debe usar funciones de agregación (SUM, COUNT, AVG, etc.).
-    2. La consulta debe ser válida para PostgreSQL.
+INSTRUCCIÓN DEL USUARIO:
+\"\"\"{mensaje_usuario}\"\"\"
 
-    Devuelve SOLO en formato JSON válido, sin texto extra:
-    {{
-      "sql": "SELECT ...",
-      "grafico": "bar | line | pie"
-    }}
-    Usa solo tablas y columnas del esquema.
-    """
+REGLAS IMPORTANTES:
+- Solo usa tablas y columnas que existan en el esquema. Si el nombre pedido no existe, elige la más similar.
+- Si usas GROUP BY, todas las demás columnas deben usar agregación (SUM, COUNT, AVG, etc.).
+- La consulta debe ser válida en PostgreSQL.
+- Si NO tienes suficiente información (falta métrica, dimensión o periodo), NO inventes SQL: devuelve una pregunta de seguimiento en el campo "ask".
+- Siempre responde SOLO en JSON válido:
 
-    print("===== PROMPT ENVIADO A GEMINI =====")
-    print(prompt)
-    print("===================================")
+1) Completo:
+{{ "sql": "SELECT ...", "grafico": "bar|line|pie|doughnut|scatter", "respuesta": "..." }}
+
+2) Falta info:
+{{ "ask": "Pregunta concreta para obtener lo que falta." }}
+"""
 
     model = genai.GenerativeModel("gemini-1.5-flash")
-    respuesta = model.generate_content(prompt)
+    resp = model.generate_content(prompt)
+    raw_text = getattr(resp, "text", str(resp))
 
     print("===== RESPUESTA CRUDA DE GEMINI =====")
-    print(respuesta.text)
+    print(raw_text)
     print("====================================")
 
+    json_block = _extract_json_block(raw_text)
+    if not json_block:
+        return (None, None,
+                "No tengo suficiente info. Indícame métrica (SUM/COUNT/AVG), dimensión (por mes/categoría) y periodo.")
+
     try:
-        match = re.search(r"\{[\s\S]*\}", respuesta.text)
-        if match:
-            json_text = match.group(0)
-        else:
-            json_text = respuesta.text
+        data = json.loads(json_block)
+    except Exception:
+        return (None, None,
+                "La respuesta no fue clara. Dime métrica, dimensión y periodo (p. ej., SUM(total) por mes 2024).")
 
-        datos = json.loads(json_text)
-        return datos.get("sql"), datos.get("grafico")
+    if "ask" in data and not data.get("sql"):
+        return (None, None, data.get("ask") or "¿Qué métrica, dimensión y periodo necesitas?")
 
-    except Exception as e:
-        print("Error parseando respuesta:", e)
-        return None, None
+    sql = data.get("sql")
+    grafico = data.get("grafico") or "bar"
+    respuesta = data.get("respuesta") or "Aquí tienes el gráfico."
+    if not sql:
+        return (None, None, "Necesito un poco más de detalle: métrica, dimensión y periodo.")
+    return (sql, grafico, respuesta)
