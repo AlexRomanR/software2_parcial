@@ -50,7 +50,8 @@ INSTALLED_APPS = [
     "fernet_fields",  
     "ingestion",      
     "prep",
-    "core"
+    "core",
+    "notifications"
 ]
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -97,7 +98,7 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'openpg', # Contraseña del usuario
+        'PASSWORD': '11310598', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
         'PORT': '5433',            # Puerto por defecto de PostgreSQL
     }
@@ -150,3 +151,14 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"     # cámbialo a donde quieras aterrizar
 LOGOUT_REDIRECT_URL = "login"
+
+
+
+# Configuración de email para alertas
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'  # o tu proveedor
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'j.d.guior010602@gmail.com'
+EMAIL_HOST_PASSWORD = 'mdzw spef tbvy ryea'
+DEFAULT_FROM_EMAIL = 'Sistema BI <j.d.guior010602@gmail.com>'
