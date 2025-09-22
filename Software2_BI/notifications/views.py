@@ -121,10 +121,65 @@ def test_kpi(request, kpi_id):
 def list_kpis(request):
     """Lista todos los KPIs del usuario"""
     kpis = KPI.objects.filter(owner=request.user).order_by('-created_at')
-    return render(request, 'v/list_kpis.html', {'kpis': kpis})
+    return render(request, 'notifications/list_kpis.html', {'kpis': kpis})
 
 @login_required
 def list_alert_rules(request):
     """Lista todas las reglas de alerta del usuario"""
     rules = AlertRule.objects.filter(kpi__owner=request.user).order_by('-created_at')
     return render(request, 'notifications/list_alert_rules.html', {'rules': rules})
+
+@require_POST
+@login_required
+def delete_kpi(request, kpi_id):
+    """Eliminar un KPI y sus reglas de alerta asociadas"""
+    kpi = get_object_or_404(KPI, id=kpi_id, owner=request.user)
+    
+    # Contar cuántas reglas de alerta se eliminarán
+    alert_rules_count = AlertRule.objects.filter(kpi=kpi).count()
+    
+    kpi_name = kpi.name
+    kpi.delete()  # Esto eliminará en cascada las reglas de alerta y alertas
+    
+    messages.success(
+        request, 
+        f'KPI "{kpi_name}" eliminado exitosamente. '
+        f'Se eliminaron {alert_rules_count} regla(s) de alerta asociada(s).'
+    )
+    return redirect('notifications:list_kpis')
+
+@require_POST
+@login_required
+def delete_alert_rule(request, rule_id):
+    """Eliminar una regla de alerta"""
+    alert_rule = get_object_or_404(AlertRule, id=rule_id, kpi__owner=request.user)
+    
+    # Contar cuántas alertas activas se resolverán
+    active_alerts = Alert.objects.filter(
+        alert_rule=alert_rule, 
+        status__in=['new', 'acknowledged']
+    ).count()
+    
+    rule_name = alert_rule.name
+    alert_rule.delete()  # Esto eliminará en cascada las alertas
+    
+    messages.success(
+        request, 
+        f'Regla de alerta "{rule_name}" eliminada exitosamente. '
+        f'Se resolvieron {active_alerts} alerta(s) activa(s).'
+    )
+    return redirect('notifications:list_alert_rules')
+
+@require_POST
+@login_required
+def delete_alert(request, alert_id):
+    """Eliminar/descartar una alerta específica"""
+    alert = get_object_or_404(Alert, id=alert_id, alert_rule__kpi__owner=request.user)
+    
+    alert.status = 'dismissed'
+    alert.resolved_by = request.user
+    alert.resolved_at = timezone.now()
+    alert.save()
+    
+    messages.success(request, 'Alerta descartada exitosamente.')
+    return redirect('notifications:dashboard')
