@@ -387,10 +387,10 @@ document.addEventListener("DOMContentLoaded", function() {
 
 // Tabs navigation
 
-var total = document.querySelectorAll('.nav-pills');
+var totalPills = document.querySelectorAll('.nav-pills');
 
 function initNavs() {
-  total.forEach(function(item, i) {
+  totalPills.forEach(function(item, i) {
     var moving_div = document.createElement('div');
     var first_li = item.querySelector('li:first-child .nav-link');
     var tab = first_li.cloneNode();
@@ -442,7 +442,7 @@ setTimeout(function() {
 // Tabs navigation resize
 
 window.addEventListener('resize', function(event) {
-  total.forEach(function(item, i) {
+  totalPills.forEach(function(item, i) {
     item.querySelector('.moving-tab').remove();
     var moving_div = document.createElement('div');
     var tab = item.querySelector(".nav-link.active").cloneNode();
@@ -482,7 +482,7 @@ window.addEventListener('resize', function(event) {
   });
 
   if (window.innerWidth < 991) {
-    total.forEach(function(item, i) {
+    totalPills.forEach(function(item, i) {
       if (!item.classList.contains('flex-column')) {
         item.classList.remove('flex-row');
         item.classList.add('flex-column', 'on-resize');
@@ -500,7 +500,7 @@ window.addEventListener('resize', function(event) {
       }
     });
   } else {
-    total.forEach(function(item, i) {
+    totalPills.forEach(function(item, i) {
       if (item.classList.contains('on-resize')) {
         item.classList.remove('flex-column', 'on-resize');
         item.classList.add('flex-row');
@@ -521,7 +521,7 @@ window.addEventListener('resize', function(event) {
 
 // Function to remove flex row on mobile devices
 if (window.innerWidth < 991) {
-  total.forEach(function(item, i) {
+  totalPills.forEach(function(item, i) {
     if (item.classList.contains('flex-row')) {
       item.classList.remove('flex-row');
       item.classList.add('flex-column', 'on-resize');
