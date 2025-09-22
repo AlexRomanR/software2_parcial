@@ -20,10 +20,14 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls import include
 from accounts.views import dashboard_view
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
 urlpatterns = [
     path("ingestion/", include("ingestion.urls", namespace="ingestion")), 
     path('admin/', admin.site.urls),
     path("", dashboard_view, name="dashboard"),
     path("accounts/", include("accounts.urls")),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    path("prep/", include(("prep.urls", "prep"), namespace="prep")),
+]
+if settings.DEBUG:
+    urlpatterns += staticfiles_urlpatterns()
