@@ -24,6 +24,7 @@ from .services import get_schema_info, generar_consulta_y_grafico, reduce_schema
 from django.core.mail import EmailMessage
 from datetime import datetime
 import base64
+from .services import analyze_chart_image
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -344,3 +345,23 @@ def enviar_email_view(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(e)})
+
+
+@login_required
+def analyze_chart_view(request):
+    context = {"result": None, "error": None}
+    if request.method == "POST" and request.FILES.get("image"):
+        image_file = request.FILES["image"]
+        if image_file.content_type not in ("image/png", "image/jpeg", "image/jpg", "image/webp"):
+            context["error"] = "Formato no soportado. Sube PNG/JPG/WEBP."
+        elif image_file.size > 5 * 1024 * 1024:
+            context["error"] = "La imagen supera 5MB."
+        else:
+            tmp_path = default_storage.save(f"uploads/{uuid.uuid4().hex}_{image_file.name}", image_file)
+            abs_path = default_storage.path(tmp_path)
+            try:
+                result = analyze_chart_image(abs_path)
+                context["result"] = result
+            except Exception as e:
+                context["error"] = str(e)
+    return render(request, "ingestion/analyze_chart.html", context)

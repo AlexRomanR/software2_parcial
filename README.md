@@ -73,6 +73,10 @@ Instalar y poner de contraseña openpg
 
    en el navegador poner: http://127.0.0.1:8000
 
+
+credencial de Django:
+usuario: elmer
+contraseña: MMMnnn1--
    
 
 
