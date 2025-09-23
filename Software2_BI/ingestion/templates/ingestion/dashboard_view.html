@@ -1,0 +1,523 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - {{ source.name }}{% endblock %}
+{% block content %}
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dashboard - {{ source.name }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    .dashboard-container {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    
+    .diagramas-section {
+      background: #f9f9f9;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    
+    .chat-section {
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 20px;
+      height: fit-content;
+      position: sticky;
+      top: 20px;
+    }
+    
+    .diagrama-card {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      margin: 15px 0;
+      padding: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .diagrama-header {
+      display: flex;
+      justify-content: between;
+      align-items: center;
+      margin-bottom: 15px;
+    }
+    
+    .diagrama-title {
+      font-size: 16px;
+      font-weight: bold;
+      color: #333;
+      margin: 0;
+    }
+    
+    .diagrama-tipo {
+      background: #e3f2fd;
+      color: #1976d2;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .diagrama-auto {
+      background: #e8f5e8;
+      color: #2e7d32;
+    }
+    
+    .diagrama-chat {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+    
+    .chart-container {
+      width: 100%;
+      height: 300px;
+      position: relative;
+    }
+    
+    .chart-canvas {
+      max-height: 280px;
+    }
+    
+    .diagrama-actions {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    
+    .btn-small {
+      padding: 5px 12px;
+      font-size: 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    
+    .btn-update {
+      background: #4caf50;
+      color: white;
+    }
+    
+    .btn-delete {
+      background: #f44336;
+      color: white;
+    }
+    
+    .btn-export {
+      background: #2196f3;
+      color: white;
+    }
+    
+    /* Chat styles */
+    #chat-box {
+      border: 1px solid #ccc;
+      height: 200px;
+      overflow-y: auto;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: #f9f9f9;
+      border-radius: 5px;
+    }
+    
+    .msg-user { color: #2563eb; margin: 5px 0; }
+    .msg-bot { color: #059669; margin: 5px 0; }
+    .msg-err { color: #dc2626; margin: 5px 0; }
+    
+    .chat-input-container {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    
+    #user-input {
+      flex: 1;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    
+    #send-btn {
+      padding: 10px 20px;
+      background: #4caf50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    
+    .preview-section {
+      margin-top: 20px;
+      padding: 15px;
+      background: #f0f8ff;
+      border-radius: 8px;
+      border: 1px solid #b3d9ff;
+      display: none;
+    }
+    
+    .save-diagram-btn {
+      background: #ff9800;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    
+    .file-info {
+      background: #e3f2fd;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+    
+    @media (max-width: 768px) {
+      .dashboard-container {
+        grid-template-columns: 1fr;
+      }
+      
+      .chat-section {
+        position: static;
+        order: -1;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="file-info">
+    <h2>📊 Dashboard - {{ source.name }}</h2>
+    <p><strong>Archivo:</strong> {{ source.name }} | <strong>Tipo:</strong> {{ source.kind }}</p>
+    <p><strong>Datos:</strong> {{ source.upload.rows_ingested|default:0 }} filas, {{ source.upload.columns|length|default:0 }} columnas</p>
+    <p><strong>Diagramas:</strong> {{ diagramas|length }} total ({{ diagramas_automaticos|length }} automáticos, {{ diagramas_chat|length }} del chat)</p>
+  </div>
+
+  <div class="dashboard-container">
+    <!-- SECCIÓN DE DIAGRAMAS -->
+    <div class="diagramas-section">
+      <h3>📈 Diagramas Generados</h3>
+      
+      {% if diagramas_automaticos %}
+      <h4>🤖 Diagramas Automáticos</h4>
+      {% for diagrama in diagramas_automaticos %}
+      <div class="diagrama-card">
+        <div class="diagrama-header">
+          <h5 class="diagrama-title">{{ diagrama.title }}</h5>
+          <span class="diagrama-tipo diagrama-auto">AUTOMÁTICO</span>
+        </div>
+        
+        {% if diagrama.description %}
+        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">{{ diagrama.description }}</p>
+        {% endif %}
+        
+        <div class="chart-container">
+          <canvas class="chart-canvas" id="chart-{{ diagrama.id }}"></canvas>
+        </div>
+        
+        <div class="diagrama-actions">
+          <button class="btn-small btn-update" onclick="actualizarDiagrama({{ diagrama.id }})">🔄 Actualizar</button>
+          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar</button>
+          {% if diagrama.source_type == 'CHAT' %}
+          <a href="{% url 'ingestion:eliminar_diagrama' diagrama.id %}" class="btn-small btn-delete" onclick="return confirm('¿Eliminar este diagrama?')">🗑️ Eliminar</a>
+          {% endif %}
+        </div>
+      </div>
+      
+      <script>
+      // Renderizar diagrama automático {{ diagrama.id }}
+      (function() {
+        const ctx = document.getElementById('chart-{{ diagrama.id }}').getContext('2d');
+        const chartData = {{ diagrama.chart_data|safe }};
+        
+        new Chart(ctx, {
+          type: '{{ diagrama.chart_type }}',
+          data: chartData,
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: '{{ diagrama.title }}',
+                font: { size: 14 }
+              },
+              legend: {
+                display: chartData.datasets.length > 1 || '{{ diagrama.chart_type }}' === 'pie' || '{{ diagrama.chart_type }}' === 'doughnut'
+              }
+            }
+          }
+        });
+      })();
+      </script>
+      {% endfor %}
+      {% endif %}
+      
+      {% if diagramas_chat %}
+      <h4>💬 Diagramas del Chat</h4>
+      {% for diagrama in diagramas_chat %}
+      <div class="diagrama-card">
+        <div class="diagrama-header">
+          <h5 class="diagrama-title">{{ diagrama.title }}</h5>
+          <span class="diagrama-tipo diagrama-chat">CHAT</span>
+        </div>
+        
+        {% if diagrama.description %}
+        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">{{ diagrama.description }}</p>
+        {% endif %}
+        
+        <div class="chart-container">
+          <canvas class="chart-canvas" id="chart-{{ diagrama.id }}"></canvas>
+        </div>
+        
+        <div class="diagrama-actions">
+          <button class="btn-small btn-update" onclick="actualizarDiagrama({{ diagrama.id }})">🔄 Actualizar</button>
+          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar</button>
+          <a href="{% url 'ingestion:eliminar_diagrama' diagrama.id %}" class="btn-small btn-delete" onclick="return confirm('¿Eliminar este diagrama?')">🗑️ Eliminar</a>
+        </div>
+      </div>
+      
+      <script>
+      // Renderizar diagrama del chat {{ diagrama.id }}
+      (function() {
+        const ctx = document.getElementById('chart-{{ diagrama.id }}').getContext('2d');
+        const chartData = {{ diagrama.chart_data|safe }};
+        
+        new Chart(ctx, {
+          type: '{{ diagrama.chart_type }}',
+          data: chartData,
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: '{{ diagrama.title }}',
+                font: { size: 14 }
+              },
+              legend: {
+                display: chartData.datasets.length > 1 || '{{ diagrama.chart_type }}' === 'pie' || '{{ diagrama.chart_type }}' === 'doughnut'
+              }
+            }
+          }
+        });
+      })();
+      </script>
+      {% endfor %}
+      {% endif %}
+      
+      {% if not diagramas %}
+      <div style="text-align: center; padding: 40px; color: #666;">
+        <h4>📊 No hay diagramas generados</h4>
+        <p>Usa el chat para generar nuevos diagramas para este archivo.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- SECCIÓN DE CHAT -->
+    <div class="chat-section">
+      <h3>💬 Chat IA - {{ source.name }}</h3>
+      <p style="font-size: 12px; color: #666; margin-bottom: 15px;">
+        Genera gráficos específicos para este archivo
+      </p>
+      
+      <div id="chat-box"></div>
+      
+      <div class="chat-input-container">
+        <input type="text" id="user-input" placeholder="Ej: Ventas por categoría..." />
+        <button id="send-btn">Enviar</button>
+      </div>
+      
+      <!-- PREVIEW DEL NUEVO DIAGRAMA -->
+      <div id="preview-section" class="preview-section">
+        <h4>🎯 Preview del Nuevo Diagrama</h4>
+        <div style="margin: 10px 0;">
+          <strong>Título:</strong> <span id="preview-title"></span><br>
+          <strong>Tipo:</strong> <span id="preview-type"></span><br>
+          <strong>Descripción:</strong> <span id="preview-description"></span>
+        </div>
+        
+        <div class="chart-container" style="height: 200px;">
+          <canvas id="preview-chart"></canvas>
+        </div>
+        
+        <div style="text-align: center; margin-top: 15px;">
+          <button class="save-diagram-btn" id="save-diagram-btn">💾 Guardar este Diagrama</button>
+          <button class="btn-small btn-delete" onclick="cerrarPreview()">❌ Descartar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const chatBox = document.getElementById("chat-box");
+  const userInput = document.getElementById("user-input");
+  const sendBtn = document.getElementById("send-btn");
+  const previewSection = document.getElementById("preview-section");
+  const saveDiagramBtn = document.getElementById("save-diagram-btn");
+  
+  let previewChart = null;
+  let currentPreviewData = null;
+
+  function addMessage(type, text) {
+    const p = document.createElement("p");
+    p.className = type === "user" ? "msg-user" : (type === "bot" ? "msg-bot" : "msg-err");
+    p.textContent = (type === "user" ? "Tú: " : type === "bot" ? "IA: " : "Error: ") + text;
+    chatBox.appendChild(p);
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+
+  function mostrarPreview(diagramaData) {
+    // Mostrar información del diagrama
+    document.getElementById('preview-title').textContent = diagramaData.title;
+    document.getElementById('preview-type').textContent = diagramaData.chart_type;
+    document.getElementById('preview-description').textContent = diagramaData.description;
+    
+    // Renderizar gráfico de preview
+    if (previewChart) previewChart.destroy();
+    
+    const ctx = document.getElementById('preview-chart').getContext('2d');
+    previewChart = new Chart(ctx, {
+      type: diagramaData.chart_type,
+      data: diagramaData.chart_data,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: {
+            display: true,
+            text: diagramaData.title,
+            font: { size: 12 }
+          }
+        }
+      }
+    });
+    
+    // Guardar datos para posterior guardado
+    currentPreviewData = diagramaData;
+    
+    // Mostrar sección de preview
+    previewSection.style.display = 'block';
+  }
+
+  function cerrarPreview() {
+    previewSection.style.display = 'none';
+    if (previewChart) {
+      previewChart.destroy();
+      previewChart = null;
+    }
+    currentPreviewData = null;
+  }
+
+  // Enviar mensaje al chat integrado
+  sendBtn.addEventListener("click", () => {
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    addMessage("user", text);
+    userInput.value = "";
+
+    fetch("{% url 'ingestion:chat_integrado' %}", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: JSON.stringify({ 
+        source_id: {{ source.id }}, 
+        mensaje: text 
+      })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) {
+        addMessage("err", data.error);
+      } else if (data.success) {
+        addMessage("bot", data.diagrama.description);
+        mostrarPreview(data.diagrama);
+      }
+    })
+    .catch(err => addMessage("err", String(err)));
+  });
+
+  // Guardar diagrama
+  saveDiagramBtn.addEventListener("click", () => {
+    if (!currentPreviewData) return;
+    
+    fetch("{% url 'ingestion:guardar_diagrama' %}", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: JSON.stringify({
+        source_id: {{ source.id }},
+        title: currentPreviewData.title,
+        description: currentPreviewData.description,
+        chart_type: currentPreviewData.chart_type,
+        chart_data: currentPreviewData.chart_data,
+        sql_query: currentPreviewData.sql_query
+      })
+    })
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.success) {
+        addMessage("bot", "✅ Diagrama guardado exitosamente");
+        cerrarPreview();
+        // Recargar página para mostrar nuevo diagrama
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        addMessage("err", data.error);
+      }
+    })
+    .catch(err => addMessage("err", String(err)));
+  });
+
+  // Enter para enviar
+  userInput.addEventListener("keypress", function(event) {
+    if (event.key === "Enter") {
+      sendBtn.click();
+    }
+  });
+
+  // Funciones para acciones de diagramas existentes
+  function actualizarDiagrama(diagramaId) {
+    fetch(`{% url 'ingestion:actualizar_diagrama' 0 %}`.replace('0', diagramaId), {
+      method: 'GET'
+    })
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.success) {
+        addMessage("bot", "✅ Diagrama actualizado");
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        addMessage("err", data.error);
+      }
+    });
+  }
+
+  function exportarDiagrama(diagramaId) {
+    const canvas = document.getElementById(`chart-${diagramaId}`);
+    const link = document.createElement('a');
+    link.download = `diagrama_${diagramaId}_${Date.now()}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    addMessage("bot", "✅ Diagrama exportado como imagen");
+  }
+</script>
+
+</body>
+</html>
+{% endblock %}

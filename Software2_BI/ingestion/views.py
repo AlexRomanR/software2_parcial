@@ -2,8 +2,12 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.core.files.storage import default_storage
 from django.urls import reverse
-from .models import DataSource, UploadedDataset
-from .services import import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, get_schema_info, generar_consulta_y_grafico
+from .models import DataSource, UploadedDataset, Diagrama
+from .services import (
+    import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, 
+    get_schema_info, generar_consulta_y_grafico, generar_diagramas_automaticos,
+    generar_diagrama_chat, guardar_diagrama, obtener_diagramas_por_archivo
+)
 import json
 import uuid
 from django.views.decorators.http import require_POST
@@ -24,6 +28,7 @@ from .services import get_schema_info, generar_consulta_y_grafico, reduce_schema
 from django.core.mail import EmailMessage
 from datetime import datetime
 import base64
+
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -42,10 +47,7 @@ def upload_dataset_view(request):
 
         # 2) Definir schema y tabla únicos
         schema = sanitize_identifier(f"user_{request.user.id}_file_{uuid.uuid4().hex[:8]}")
-
         table = sanitize_identifier(f"ds_{ds.id}")
-
-
         path = up.file.path
 
         # 3) Importar datos según tipo
@@ -69,6 +71,13 @@ def upload_dataset_view(request):
                 up.columns = meta_info[main_table]["columns"]
                 up.save(update_fields=["rows_ingested", "columns"])
 
+        # 4) NUEVO: Generar diagramas automáticos
+        try:
+            diagramas_creados = generar_diagramas_automaticos(ds)
+            print(f"✅ Generados {len(diagramas_creados)} diagramas automáticos para {ds.name}")
+        except Exception as e:
+            print(f"❌ Error generando diagramas automáticos: {e}")
+
         return redirect("ingestion:list")
 
     return render(request, "ingestion/upload.html")
@@ -78,15 +87,12 @@ def list_sources_view(request):
     sources = DataSource.objects.filter(owner=request.user).order_by("-created_at")
     return render(request, "ingestion/list.html", {"sources": sources})
 
-
-
 def chart_view(request, source_id):
     source = DataSource.objects.get(id=source_id)
     df = get_dataset(source.internal_schema, source.internal_table)
 
     if "fecha" in df.columns:
         df["fecha"] = df["fecha"].astype(str)
-
 
     # Convertir a lista de diccionarios
     chart_data = df.to_dict(orient="records")
@@ -98,8 +104,6 @@ def chart_view(request, source_id):
         "source": source,
         "chart_data": chart_data_json
     })
-
-
 
 def user_data_summary_view(request):
     user = request.user
@@ -118,7 +122,6 @@ def user_data_summary_view(request):
 
     return render(request, "ingestion/user_summary.html", {"all_data": all_data})
 
-
 @require_POST
 def delete_source(request, source_id):
     # Obtenemos el dataset y su DataSource relacionado
@@ -136,7 +139,6 @@ def delete_source(request, source_id):
         cursor.execute("DELETE FROM ingestion_externalconnection WHERE source_id = %s;", [dataset.source.id])
 
     return redirect("dashboard")  # Ajusta a la vista a la que quieras volver
-
 
 def download_schema(request, source_id):
     dataset = get_object_or_404(UploadedDataset, id=source_id)
@@ -168,8 +170,6 @@ def download_schema(request, source_id):
 
     # Devolver archivo como descarga
     return FileResponse(open(tmp_file.name, "rb"), as_attachment=True, filename=f"{schema}.sql")
-
-
 
 def prueba_view(request):
     sql = None
@@ -213,8 +213,6 @@ def prueba_view(request):
         "datos": datos
     })
 
-
-
 def obtener_esquema_bd(schema_name):
     """Obtiene tablas y columnas del esquema seleccionado"""
     with connection.cursor() as cursor:
@@ -231,8 +229,6 @@ def obtener_esquema_bd(schema_name):
         esquema.setdefault(tabla, []).append(col)
 
     return esquema
-
-
 
 def dashboard(request):
     engine = get_engine()
@@ -289,6 +285,7 @@ def prueba_chat_view(request):
         encoder=DjangoJSONEncoder,
         json_dumps_params={"ensure_ascii": False}
     )
+
 @csrf_exempt
 def enviar_email_view(request):
     if request.method != "POST":
@@ -344,3 +341,155 @@ def enviar_email_view(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({"success": False, "error": str(e)})
+
+# ========================================
+# NUEVAS VISTAS PARA DIAGRAMAS
+# ========================================
+
+@login_required
+def dashboard_view(request, source_id):
+    """
+    Vista principal del dashboard para un archivo específico.
+    Muestra diagramas automáticos + chat integrado.
+    """
+    source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+    diagramas = obtener_diagramas_por_archivo(source)
+    
+    context = {
+        'source': source,
+        'diagramas': diagramas,
+        'diagramas_automaticos': diagramas.filter(source_type=Diagrama.AUTO),
+        'diagramas_chat': diagramas.filter(source_type=Diagrama.CHAT),
+    }
+    
+    return render(request, 'ingestion/dashboard_view.html', context)
+
+@csrf_exempt
+@login_required
+def chat_integrado_view(request):
+    """
+    Chat integrado específico para un archivo.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        source_id = data.get('source_id')
+        mensaje = data.get('mensaje', '').strip()
+        
+        if not source_id or not mensaje:
+            return JsonResponse({"error": "Source ID y mensaje requeridos"}, status=400)
+        
+        source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+        
+        # Generar diagrama usando el chat
+        diagrama, error = generar_diagrama_chat(source, mensaje)
+        
+        if error:
+            return JsonResponse({"error": error}, status=400)
+        
+        # Retornar datos del diagrama para preview
+        return JsonResponse({
+            "success": True,
+            "diagrama": {
+                "title": diagrama.title,
+                "description": diagrama.description,
+                "chart_type": diagrama.chart_type,
+                "chart_data": diagrama.chart_data,
+                "sql_query": diagrama.sql_query
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@csrf_exempt
+@login_required
+def guardar_diagrama_view(request):
+    """
+    Guarda un diagrama generado por el chat.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Método no permitido"}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        source_id = data.get('source_id')
+        title = data.get('title')
+        description = data.get('description')
+        chart_type = data.get('chart_type')
+        chart_data = data.get('chart_data')
+        sql_query = data.get('sql_query')
+        
+        if not all([source_id, title, chart_type, chart_data, sql_query]):
+            return JsonResponse({"error": "Datos incompletos"}, status=400)
+        
+        source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+        
+        # Crear y guardar diagrama
+        diagrama = Diagrama.objects.create(
+            data_source=source,
+            owner=request.user,
+            title=title,
+            description=description,
+            chart_type=chart_type,
+            source_type=Diagrama.CHAT,
+            sql_query=sql_query,
+            chart_data=chart_data,
+            order=source.diagramas_count
+        )
+        
+        return JsonResponse({
+            "success": True,
+            "diagrama_id": diagrama.id,
+            "message": "Diagrama guardado exitosamente"
+        })
+        
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+@login_required
+def listar_diagramas_view(request, source_id):
+    """
+    Lista todos los diagramas de un archivo específico.
+    """
+    source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+    diagramas = obtener_diagramas_por_archivo(source)
+    
+    return render(request, 'ingestion/listar_diagramas.html', {
+        'source': source,
+        'diagramas': diagramas
+    })
+
+@require_POST
+@login_required
+def eliminar_diagrama_view(request, diagrama_id):
+    """
+    Elimina un diagrama específico.
+    """
+    diagrama = get_object_or_404(Diagrama, id=diagrama_id, owner=request.user)
+    source_id = diagrama.data_source.id
+    diagrama.delete()
+    
+    return redirect('ingestion:dashboard_view', source_id=source_id)
+
+@login_required
+def actualizar_diagrama_view(request, diagrama_id):
+    """
+    Re-ejecuta la consulta de un diagrama para actualizar datos.
+    """
+    diagrama = get_object_or_404(Diagrama, id=diagrama_id, owner=request.user)
+    
+    try:
+        chart_data = diagrama.execute_query()
+        return JsonResponse({
+            "success": True,
+            "chart_data": chart_data,
+            "message": "Diagrama actualizado"
+        })
+    except Exception as e:
+        return JsonResponse({
+            "success": False,
+            "error": str(e)
+        }, status=500)

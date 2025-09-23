@@ -423,7 +423,7 @@ def generar_consulta_y_grafico(esquema_reducido: dict, mensaje_usuario: str):
             if len(ejemplos) >= 2:
                 break
 
-        ejemplos_texto = " o ".join([f"“{e}”" for e in ejemplos]) if ejemplos else "“Conteo de registros por categoría”"
+        ejemplos_texto = " o ".join([f"'{e}'" for e in ejemplos]) if ejemplos else "'Conteo de registros por categoría'"        
         return (None, None, f"¡Hola! Dime qué quieres ver. Por ejemplo: {ejemplos_texto}.")
 
     prompt = f"""
@@ -477,3 +477,877 @@ REGLAS IMPORTANTES:
     if not sql:
         return (None, None, "Necesito un poco más de detalle: métrica, dimensión y periodo.")
     return (sql, grafico, respuesta)
+
+# ========================================
+# NUEVAS FUNCIONES PARA DIAGRAMAS AUTOMÁTICOS
+# ========================================
+
+def analizar_datos_archivo(data_source):
+    """
+    Analiza los datos reales del archivo para determinar qué gráficos son más útiles.
+    """
+    engine = get_engine()
+    schema = data_source.internal_schema
+    tabla = data_source.internal_table
+    
+    analisis = {
+        "total_registros": 0,
+        "columnas": [],
+        "columnas_numericas": [],
+        "columnas_categoricas": [],
+        "columnas_fecha": [],
+        "columnas_unicas": [],
+        "patrones_detectados": [],
+        "recomendaciones_graficos": []
+    }
+    
+    try:
+        with engine.begin() as conn:
+            # 1. Información básica
+            result = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{tabla}"'))
+            analisis["total_registros"] = result.scalar()
+            
+            # 2. Análisis de columnas
+            result = conn.execute(text("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = :schema AND table_name = :tabla
+                ORDER BY ordinal_position
+            """), {"schema": schema, "tabla": tabla})
+            
+            columnas_info = [(row[0], row[1]) for row in result.fetchall()]
+            analisis["columnas"] = [col[0] for col in columnas_info]
+            
+            # 3. Análisis detallado por columna
+            for col_name, data_type in columnas_info:
+                # Contar valores únicos
+                result = conn.execute(text(f'SELECT COUNT(DISTINCT "{col_name}") FROM "{schema}"."{tabla}"'))
+                valores_unicos = result.scalar()
+                
+                col_info = {
+                    "nombre": col_name,
+                    "tipo": data_type,
+                    "valores_unicos": valores_unicos,
+                    "es_categorica": valores_unicos <= 20 and valores_unicos > 1,
+                    "es_identificador": valores_unicos == analisis["total_registros"],
+                    "es_numerica": data_type in ['integer', 'bigint', 'numeric', 'real', 'double precision'],
+                    "es_fecha": 'date' in data_type.lower() or 'timestamp' in data_type.lower()
+                }
+                
+                # Detectar patrones de negocio
+                col_lower = col_name.lower()
+                if any(palabra in col_lower for palabra in ['precio', 'monto', 'costo', 'valor', 'total', 'venta', 'ingreso']):
+                    col_info["es_monetaria"] = True
+                    analisis["patrones_detectados"].append(f"Columna monetaria detectada: {col_name}")
+                
+                if col_info["es_categorica"]:
+                    analisis["columnas_categoricas"].append(col_info)
+                elif col_info["es_numerica"] and not col_info["es_identificador"]:
+                    analisis["columnas_numericas"].append(col_info)
+                elif col_info["es_fecha"]:
+                    analisis["columnas_fecha"].append(col_info)
+                elif col_info["es_identificador"]:
+                    analisis["columnas_unicas"].append(col_info)
+        
+        return analisis
+        
+    except Exception as e:
+        print(f"Error analizando datos: {e}")
+        return analisis
+
+def analizar_datos_archivo(data_source):
+    """
+    Analiza inteligentemente los datos para identificar patrones y oportunidades de visualización.
+    """
+    engine = get_engine()
+    schema = data_source.internal_schema
+    tabla = data_source.internal_table
+    
+    analisis = {
+        "total_registros": 0,
+        "columnas_metricas": [],  # Columnas numéricas útiles para análisis
+        "columnas_dimensiones": [],  # Columnas categóricas para agrupar
+        "columnas_temporales": [],  # Fechas y timestamps
+        "columnas_ignorar": [],  # IDs y columnas sin valor analítico
+        "dominio_detectado": None,  # Tipo de dataset detectado
+        "metricas_principales": []  # Las métricas más relevantes
+    }
+    
+    try:
+        with engine.begin() as conn:
+            # Obtener total de registros
+            result = conn.execute(text(f'SELECT COUNT(*) FROM "{schema}"."{tabla}"'))
+            analisis["total_registros"] = result.scalar()
+            
+            if analisis["total_registros"] == 0:
+                return analisis
+            
+            # Obtener información de columnas
+            result = conn.execute(text("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = :schema AND table_name = :tabla
+                ORDER BY ordinal_position
+            """), {"schema": schema, "tabla": tabla})
+            
+            columnas_info = [(row[0], row[1]) for row in result.fetchall()]
+            
+            # Analizar cada columna con inteligencia contextual
+            for col_name, data_type in columnas_info:
+                col_lower = col_name.lower()
+                
+                # Obtener estadísticas básicas
+                result = conn.execute(text(f'''
+                    SELECT 
+                        COUNT(DISTINCT "{col_name}") as valores_unicos,
+                        COUNT("{col_name}") as valores_no_nulos
+                    FROM "{schema}"."{tabla}"
+                '''))
+                stats = result.fetchone()
+                valores_unicos = stats[0]
+                valores_no_nulos = stats[1]
+                
+                # Ratio de unicidad
+                ratio_unicidad = valores_unicos / analisis["total_registros"] if analisis["total_registros"] > 0 else 0
+                
+                # DETECTAR COLUMNAS A IGNORAR
+                es_id = any(palabra in col_lower for palabra in ['id', 'codigo', 'key', 'index', 'pk', 'uuid'])
+                es_secuencial = False
+                
+                # Verificar si es una secuencia (1,2,3,4...)
+                if data_type in ['integer', 'bigint'] and valores_unicos > 10:
+                    result = conn.execute(text(f'''
+                        SELECT MIN("{col_name}"), MAX("{col_name}") 
+                        FROM "{schema}"."{tabla}"
+                        WHERE "{col_name}" IS NOT NULL
+                    '''))
+                    min_val, max_val = result.fetchone()
+                    if min_val is not None and max_val is not None:
+                        rango_esperado = max_val - min_val + 1
+                        es_secuencial = abs(valores_unicos - rango_esperado) < rango_esperado * 0.1
+                
+                if es_id or es_secuencial or ratio_unicidad > 0.95:
+                    analisis["columnas_ignorar"].append(col_name)
+                    continue
+                
+                # CLASIFICAR COLUMNAS ÚTILES
+                
+                # 1. TEMPORALES - Máxima prioridad
+                if 'date' in data_type.lower() or 'timestamp' in data_type.lower():
+                    analisis["columnas_temporales"].append({
+                        "nombre": col_name,
+                        "tipo": data_type
+                    })
+                elif any(palabra in col_lower for palabra in ['fecha', 'date', 'año', 'year', 'mes', 'month', 'dia', 'day', 'periodo', 'period']):
+                    analisis["columnas_temporales"].append({
+                        "nombre": col_name,
+                        "tipo": data_type
+                    })
+                
+                # 2. MÉTRICAS - Columnas numéricas con significado
+                elif data_type in ['integer', 'bigint', 'numeric', 'real', 'double precision', 'decimal', 'float']:
+                    # Detectar métricas de negocio por nomenclatura
+                    es_metrica_negocio = any(palabra in col_lower for palabra in [
+                        'cantidad', 'amount', 'total', 'suma', 'sum',
+                        'precio', 'price', 'costo', 'cost', 'valor', 'value',
+                        'venta', 'sale', 'ingreso', 'revenue', 'ganancia', 'profit',
+                        'score', 'punto', 'point', 'nota', 'grade', 'calificacion',
+                        'duracion', 'duration', 'tiempo', 'time', 'hora', 'hour',
+                        'peso', 'weight', 'altura', 'height', 'edad', 'age',
+                        'distancia', 'distance', 'velocidad', 'speed', 'temperatura',
+                        'porcentaje', 'percentage', 'ratio', 'rate', 'promedio', 'average'
+                    ])
+                    
+                    # Si no es una métrica obvia, verificar si tiene variación significativa
+                    if not es_metrica_negocio and valores_unicos > 5:
+                        result = conn.execute(text(f'''
+                            SELECT STDDEV("{col_name}"), AVG("{col_name}")
+                            FROM "{schema}"."{tabla}"
+                            WHERE "{col_name}" IS NOT NULL
+                        '''))
+                        stddev, avg = result.fetchone()
+                        if stddev and avg and avg != 0:
+                            coef_variacion = abs(stddev / avg)
+                            es_metrica_negocio = coef_variacion > 0.1  # Variación significativa
+                    
+                    if es_metrica_negocio:
+                        analisis["columnas_metricas"].append({
+                            "nombre": col_name,
+                            "tipo": "monetaria" if any(p in col_lower for p in ['precio', 'costo', 'venta', 'ingreso']) else "general",
+                            "prioridad": 1 if es_metrica_negocio else 2
+                        })
+                
+                # 3. DIMENSIONES - Columnas categóricas útiles para agrupar
+                elif valores_unicos >= 2 and valores_unicos <= 100:
+                    # Obtener muestra de valores para análisis semántico
+                    result = conn.execute(text(f'''
+                        SELECT DISTINCT "{col_name}" 
+                        FROM "{schema}"."{tabla}"
+                        WHERE "{col_name}" IS NOT NULL
+                        LIMIT 5
+                    '''))
+                    muestra = [str(row[0]) for row in result.fetchall()]
+                    
+                    # Verificar que no sean valores sin sentido
+                    valores_sospechosos = all(
+                        len(str(v)) > 20 or  # Valores muy largos
+                        str(v).count('-') > 3 or  # Muchos guiones (UUIDs)
+                        str(v).count('_') > 3  # Muchos underscores (códigos)
+                        for v in muestra if v
+                    )
+                    
+                    if not valores_sospechosos:
+                        analisis["columnas_dimensiones"].append({
+                            "nombre": col_name,
+                            "valores_unicos": valores_unicos,
+                            "es_principal": valores_unicos <= 10,  # Dimensiones principales tienen pocos valores
+                            "muestra": muestra[:3]
+                        })
+            
+            # DETECTAR DOMINIO DEL DATASET
+            analisis["dominio_detectado"] = _detectar_dominio_dataset(columnas_info, analisis)
+            
+            # PRIORIZAR MÉTRICAS SEGÚN DOMINIO
+            analisis["metricas_principales"] = _priorizar_metricas(analisis)
+        
+        return analisis
+        
+    except Exception as e:
+        print(f"Error analizando datos: {e}")
+        return analisis
+
+
+def _detectar_dominio_dataset(columnas_info, analisis):
+    """
+    Detecta el tipo de dataset basado en las columnas.
+    """
+    columnas_lower = [col[0].lower() for col in columnas_info]
+    
+    # Patrones por dominio
+    dominios = {
+        "ventas": ['venta', 'sale', 'cliente', 'customer', 'producto', 'product', 'precio', 'price'],
+        "academico": ['estudiante', 'student', 'curso', 'course', 'nota', 'grade', 'calificacion', 'score'],
+        "rrhh": ['empleado', 'employee', 'salario', 'salary', 'departamento', 'department', 'cargo', 'position'],
+        "inventario": ['stock', 'inventory', 'producto', 'item', 'cantidad', 'quantity', 'almacen', 'warehouse'],
+        "financiero": ['cuenta', 'account', 'transaccion', 'transaction', 'balance', 'monto', 'amount'],
+        "salud": ['paciente', 'patient', 'diagnostico', 'diagnosis', 'tratamiento', 'treatment', 'medico', 'doctor'],
+        "marketing": ['campaña', 'campaign', 'conversion', 'click', 'impresion', 'impression', 'ctr', 'roi'],
+        "logistica": ['envio', 'shipment', 'pedido', 'order', 'entrega', 'delivery', 'ruta', 'route'],
+        "deportes": ['jugador', 'player', 'equipo', 'team', 'partido', 'game', 'gol', 'goal', 'punto', 'score'],
+        "investigacion": ['experimento', 'experiment', 'muestra', 'sample', 'resultado', 'result', 'medicion', 'measurement']
+    }
+    
+    mejor_dominio = "general"
+    mejor_coincidencias = 0
+    
+    for dominio, palabras in dominios.items():
+        coincidencias = sum(1 for palabra in palabras if any(palabra in col for col in columnas_lower))
+        if coincidencias > mejor_coincidencias:
+            mejor_coincidencias = coincidencias
+            mejor_dominio = dominio
+    
+    return mejor_dominio
+
+
+def _priorizar_metricas(analisis):
+    """
+    Prioriza las métricas más relevantes según el dominio detectado.
+    """
+    dominio = analisis["dominio_detectado"]
+    metricas = analisis["columnas_metricas"]
+    
+    if not metricas:
+        return []
+    
+    # Prioridades por dominio
+    prioridades_dominio = {
+        "ventas": ['total', 'venta', 'ingreso', 'cantidad', 'precio'],
+        "academico": ['nota', 'calificacion', 'score', 'promedio', 'puntos'],
+        "financiero": ['monto', 'balance', 'total', 'valor', 'cantidad'],
+        "salud": ['resultado', 'medicion', 'valor', 'duracion', 'cantidad'],
+        "deportes": ['puntos', 'goles', 'score', 'tiempo', 'distancia']
+    }
+    
+    palabras_prioritarias = prioridades_dominio.get(dominio, ['total', 'cantidad', 'valor'])
+    
+    # Ordenar métricas por relevancia
+    metricas_ordenadas = []
+    for metrica in metricas:
+        nombre_lower = metrica["nombre"].lower()
+        prioridad = 10  # Prioridad base
+        
+        for idx, palabra in enumerate(palabras_prioritarias):
+            if palabra in nombre_lower:
+                prioridad = idx
+                break
+        
+        metricas_ordenadas.append({**metrica, "prioridad_final": prioridad})
+    
+    metricas_ordenadas.sort(key=lambda x: x["prioridad_final"])
+    return metricas_ordenadas[:3]  # Top 3 métricas
+
+
+def generar_diagramas_automaticos(data_source):
+    """
+    Genera 3 diagramas diversos y útiles basados en análisis inteligente.
+    """
+    from .models import Diagrama
+    
+    print(f"🔍 Analizando: {data_source.name}")
+    
+    # 1. Análisis inteligente
+    analisis = analizar_datos_archivo(data_source)
+    
+    if analisis["total_registros"] == 0:
+        print("❌ Sin datos para analizar")
+        return []
+    
+    print(f"📊 Dataset tipo: {analisis['dominio_detectado']}")
+    print(f"📈 {len(analisis['columnas_metricas'])} métricas útiles encontradas")
+    print(f"📂 {len(analisis['columnas_dimensiones'])} dimensiones para análisis")
+    
+    # 2. Generar estrategia de visualización diversa
+    graficos_plan = _planificar_graficos_diversos(analisis, data_source)
+    
+    if not graficos_plan:
+        print("⚠️ No se pudieron planificar gráficos útiles")
+        return []
+    
+    # 3. Crear los diagramas
+    diagramas_creados = []
+    
+    for i, plan in enumerate(graficos_plan[:3]):  # Máximo 3 gráficos
+        try:
+            # Ejecutar SQL
+            chart_data = ejecutar_sql_para_chart(plan["sql"])
+            
+            if not chart_data or not chart_data.get("labels"):
+                print(f"⚠️ Sin datos para: {plan['titulo']}")
+                continue
+            
+            # Limitar datos si es necesario
+            if len(chart_data["labels"]) > 15 and plan["chart_type"] in ["bar", "line"]:
+                chart_data["labels"] = chart_data["labels"][:15]
+                chart_data["datasets"][0]["data"] = chart_data["datasets"][0]["data"][:15]
+            
+            # Crear descripción concisa con hallazgo principal
+            descripcion = _generar_descripcion_concisa(chart_data, plan, analisis)
+            
+            diagrama = Diagrama.objects.create(
+                data_source=data_source,
+                owner=data_source.owner,
+                title=plan["titulo"],
+                description=descripcion,
+                chart_type=plan["chart_type"],
+                source_type=Diagrama.AUTO,
+                sql_query=plan["sql"],
+                chart_data=chart_data,
+                order=i
+            )
+            
+            diagramas_creados.append(diagrama)
+            print(f"✅ Creado: {plan['titulo']}")
+            
+        except Exception as e:
+            print(f"❌ Error en {plan.get('titulo', 'gráfico')}: {e}")
+            continue
+    
+    print(f"✨ {len(diagramas_creados)} diagramas útiles creados")
+    return diagramas_creados
+
+
+def _planificar_graficos_diversos(analisis, data_source):
+    """
+    Planifica 3 gráficos diversos que aporten diferentes perspectivas.
+    """
+    schema = data_source.internal_schema
+    tabla = data_source.internal_table
+    graficos = []
+    tipos_usados = set()
+    
+    # GRÁFICO 1: Distribución principal (si hay dimensiones buenas)
+    if analisis["columnas_dimensiones"]:
+        dim = min(analisis["columnas_dimensiones"], key=lambda x: x["valores_unicos"])
+        
+        if dim["valores_unicos"] <= 12:
+            sql = f'''
+                SELECT "{dim['nombre']}" as label, 
+                       COUNT(*) as value 
+                FROM "{schema}"."{tabla}" 
+                WHERE "{dim['nombre']}" IS NOT NULL
+                GROUP BY "{dim['nombre']}" 
+                ORDER BY value DESC
+            '''
+            
+            graficos.append({
+                "titulo": f"Distribución por {_humanizar_nombre(dim['nombre'])}",
+                "sql": sql,
+                "chart_type": "pie" if dim["valores_unicos"] <= 6 else "bar",
+                "tipo_analisis": "distribucion"
+            })
+            tipos_usados.add("distribucion")
+    
+    # GRÁFICO 2: Tendencia temporal (si hay fechas)
+    if analisis["columnas_temporales"] and "tendencia" not in tipos_usados:
+        temp = analisis["columnas_temporales"][0]
+        
+        # Si hay métricas, usar la principal
+        if analisis["metricas_principales"]:
+            metrica = analisis["metricas_principales"][0]
+            sql = f'''
+                SELECT DATE_TRUNC('month', "{temp['nombre']}"::date) as label,
+                       SUM("{metrica['nombre']}") as value
+                FROM "{schema}"."{tabla}"
+                WHERE "{temp['nombre']}" IS NOT NULL
+                GROUP BY DATE_TRUNC('month', "{temp['nombre']}"::date)
+                ORDER BY label
+            '''
+            titulo = f"Evolución de {_humanizar_nombre(metrica['nombre'])} por Mes"
+        else:
+            sql = f'''
+                SELECT DATE_TRUNC('month', "{temp['nombre']}"::date) as label,
+                       COUNT(*) as value
+                FROM "{schema}"."{tabla}"
+                WHERE "{temp['nombre']}" IS NOT NULL
+                GROUP BY DATE_TRUNC('month', "{temp['nombre']}"::date)
+                ORDER BY label
+            '''
+            titulo = "Actividad por Mes"
+        
+        graficos.append({
+            "titulo": titulo,
+            "sql": sql,
+            "chart_type": "line",
+            "tipo_analisis": "tendencia"
+        })
+        tipos_usados.add("tendencia")
+    
+    # GRÁFICO 3: Comparación o Ranking
+    if len(graficos) < 3:
+        if analisis["columnas_metricas"] and analisis["columnas_dimensiones"]:
+            # Comparación métrica por dimensión
+            metrica = analisis["metricas_principales"][0] if analisis["metricas_principales"] else analisis["columnas_metricas"][0]
+            
+            # Buscar dimensión diferente a la ya usada
+            dim_disponibles = [d for d in analisis["columnas_dimensiones"] 
+                              if not any(d["nombre"] in g["sql"] for g in graficos)]
+            
+            if dim_disponibles:
+                dim = min(dim_disponibles, key=lambda x: x["valores_unicos"])
+                
+                sql = f'''
+                    SELECT "{dim['nombre']}" as label,
+                           AVG("{metrica['nombre']}") as value
+                    FROM "{schema}"."{tabla}"
+                    WHERE "{dim['nombre']}" IS NOT NULL 
+                      AND "{metrica['nombre']}" IS NOT NULL
+                    GROUP BY "{dim['nombre']}"
+                    ORDER BY value DESC
+                    LIMIT 10
+                '''
+                
+                graficos.append({
+                    "titulo": f"Promedio de {_humanizar_nombre(metrica['nombre'])} por {_humanizar_nombre(dim['nombre'])}",
+                    "sql": sql,
+                    "chart_type": "bar",
+                    "tipo_analisis": "comparacion"
+                })
+                tipos_usados.add("comparacion")
+        
+        elif analisis["columnas_dimensiones"] and len(analisis["columnas_dimensiones"]) > 1:
+            # Top valores de una dimensión no usada
+            dims_no_usadas = [d for d in analisis["columnas_dimensiones"] 
+                             if not any(d["nombre"] in g["sql"] for g in graficos)]
+            
+            if dims_no_usadas:
+                dim = dims_no_usadas[0]
+                sql = f'''
+                    SELECT "{dim['nombre']}" as label,
+                           COUNT(*) as value
+                    FROM "{schema}"."{tabla}"
+                    WHERE "{dim['nombre']}" IS NOT NULL
+                    GROUP BY "{dim['nombre']}"
+                    ORDER BY value DESC
+                    LIMIT 10
+                '''
+                
+                graficos.append({
+                    "titulo": f"Top 10 {_humanizar_nombre(dim['nombre'])}",
+                    "sql": sql,
+                    "chart_type": "bar",
+                    "tipo_analisis": "ranking"
+                })
+    
+    # Si aún faltan gráficos y hay métricas, crear análisis estadístico
+    if len(graficos) < 3 and analisis["columnas_metricas"]:
+        for metrica in analisis["columnas_metricas"]:
+            if not any(metrica["nombre"] in g["sql"] for g in graficos):
+                sql = f'''
+                    SELECT 
+                        'Mínimo' as label, MIN("{metrica['nombre']}") as value FROM "{schema}"."{tabla}"
+                    UNION ALL
+                    SELECT 
+                        'Promedio' as label, AVG("{metrica['nombre']}") as value FROM "{schema}"."{tabla}"
+                    UNION ALL
+                    SELECT 
+                        'Máximo' as label, MAX("{metrica['nombre']}") as value FROM "{schema}"."{tabla}"
+                '''
+                
+                graficos.append({
+                    "titulo": f"Estadísticas de {_humanizar_nombre(metrica['nombre'])}",
+                    "sql": sql,
+                    "chart_type": "bar",
+                    "tipo_analisis": "estadistica"
+                })
+                break
+    
+    return graficos
+
+
+def _generar_descripcion_concisa(chart_data, plan, analisis):
+    """
+    Genera una descripción concisa con el hallazgo principal del gráfico.
+    """
+    labels = chart_data.get("labels", [])
+    values = chart_data["datasets"][0].get("data", [])
+    
+    if not labels or not values:
+        return "Visualización de datos"
+    
+    tipo_analisis = plan.get("tipo_analisis", "")
+    
+    if tipo_analisis == "distribucion":
+        # Encontrar el valor dominante
+        max_idx = values.index(max(values))
+        total = sum(values)
+        porcentaje = (values[max_idx] / total * 100) if total > 0 else 0
+        return f"{labels[max_idx]} representa el {porcentaje:.0f}% del total ({values[max_idx]:,} de {total:,} registros)"
+    
+    elif tipo_analisis == "tendencia":
+        # Calcular cambio
+        if len(values) > 1:
+            cambio = ((values[-1] - values[0]) / values[0] * 100) if values[0] != 0 else 0
+            direccion = "aumentó" if cambio > 0 else "disminuyó"
+            return f"La métrica {direccion} {abs(cambio):.0f}% desde {labels[0]} hasta {labels[-1]}"
+        else:
+            return f"Valor actual: {values[0]:,}"
+    
+    elif tipo_analisis == "comparacion" or tipo_analisis == "ranking":
+        # Mostrar top 3
+        top_items = []
+        for i in range(min(3, len(labels))):
+            top_items.append(f"{labels[i]}: {values[i]:,.0f}")
+        return f"Líderes: {', '.join(top_items)}"
+    
+    elif tipo_analisis == "estadistica":
+        # Mostrar rango
+        min_val = min(values)
+        max_val = max(values)
+        avg_val = sum(values) / len(values) if len(values) > 0 else 0
+        return f"Rango: {min_val:,.0f} - {max_val:,.0f} (promedio: {avg_val:,.0f})"
+    
+    else:
+        # Descripción genérica
+        return f"Análisis de {analisis['total_registros']:,} registros"
+
+
+def _humanizar_nombre(nombre_columna):
+    """
+    Convierte nombre_de_columna en Nombre De Columna.
+    """
+    # Reemplazar _ y - con espacios
+    nombre = nombre_columna.replace('_', ' ').replace('-', ' ')
+    
+    # Capitalizar cada palabra
+    palabras = nombre.split()
+    palabras_capitalizadas = []
+    
+    for palabra in palabras:
+        # Mantener acrónimos en mayúsculas
+        if palabra.isupper() and len(palabra) <= 4:
+            palabras_capitalizadas.append(palabra)
+        else:
+            palabras_capitalizadas.append(palabra.capitalize())
+    
+    return ' '.join(palabras_capitalizadas)
+    
+def generar_diagrama_chat(data_source, mensaje_usuario):
+    """
+    Genera un diagrama usando el chat, específico para un archivo.
+    CORREGIDO: Usa esquema completo y columnas reales.
+    Retorna (diagrama_obj, error_msg)
+    """
+    from .models import Diagrama
+    
+    if not data_source.internal_schema or not data_source.internal_table:
+        return None, "El archivo no tiene datos válidos"
+    
+    try:
+        # Obtener esquema específico del archivo
+        esquema_info = get_schema_info(data_source.internal_schema)
+        tabla = data_source.internal_table
+        info_tabla = esquema_info.get(tabla, {})
+        columnas = info_tabla.get("columns", [])
+        
+        if not columnas:
+            return None, "No se pudo analizar la estructura del archivo"
+        
+        print(f"DEBUG Chat - Esquema: {data_source.internal_schema}")
+        print(f"DEBUG Chat - Tabla: {tabla}")
+        print(f"DEBUG Chat - Columnas: {columnas}")
+        
+        # PROMPT CORREGIDO que fuerza uso de esquema completo
+        prompt_corregido = f"""
+Eres un asistente experto en SQL para PostgreSQL.
+
+INFORMACIÓN OBLIGATORIA:
+- Esquema: {data_source.internal_schema}
+- Tabla: {tabla}
+- Columnas disponibles: {columnas}
+
+REGLAS ESTRICTAS DE SQL:
+1. SIEMPRE usar: FROM "{data_source.internal_schema}"."{tabla}"
+2. SIEMPRE usar comillas dobles en nombres de columnas: "Category", "Price", "Name"
+3. El resultado DEBE tener exactamente: SELECT columna as label, valor as value
+4. Solo usar columnas que existen en la lista: {columnas}
+
+MENSAJE DEL USUARIO:
+"{mensaje_usuario}"
+
+IMPORTANTE: 
+- Si pregunta por "categoría" o "category", usar la columna "Category"
+- Si pregunta por "precio" o "price", usar la columna "Price" 
+- Si pregunta por "marca" o "brand", usar la columna "Brand"
+- Si pregunta por "stock" o "inventario", usar la columna "Stock"
+
+FORMATO DE RESPUESTA (solo JSON válido):
+{{
+  "sql": "SELECT \"columna_exacta\" as label, COUNT(*) as value FROM \"{data_source.internal_schema}\".\"{tabla}\" WHERE \"columna_exacta\" IS NOT NULL GROUP BY \"columna_exacta\" ORDER BY value DESC LIMIT 15",
+  "grafico": "bar|line|pie",
+  "respuesta": "Descripción breve del análisis"
+}}
+
+Ejemplo correcto:
+{{
+  "sql": "SELECT \"Category\" as label, COUNT(*) as value FROM \"{data_source.internal_schema}\".\"{tabla}\" GROUP BY \"Category\" ORDER BY value DESC",
+  "grafico": "pie",
+  "respuesta": "Distribución de productos por categoría"
+}}
+"""
+        
+        # Llamar a Gemini con prompt corregido
+        import google.generativeai as genai
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        resp = model.generate_content(prompt_corregido)
+        raw_text = getattr(resp, "text", str(resp))
+        
+        print("===== RESPUESTA GEMINI CHAT =====")
+        print(raw_text)
+        print("==================================")
+        
+        # Extraer JSON
+        json_block = _extract_json_block(raw_text)
+        if not json_block:
+            return None, "No se pudo generar una consulta válida"
+        
+        try:
+            data = json.loads(json_block)
+        except json.JSONDecodeError:
+            return None, "Respuesta inválida de la IA"
+        
+        sql = data.get("sql")
+        chart_type = data.get("grafico", "bar")
+        respuesta = data.get("respuesta", "Análisis generado")
+        
+        if not sql:
+            return None, "No se pudo generar consulta SQL"
+        
+        print(f"SQL generado: {sql}")
+        
+        # VALIDAR que el SQL use el esquema correcto
+        if f'"{data_source.internal_schema}"."{tabla}"' not in sql:
+            # CORREGIR automáticamente si no usa esquema completo
+            sql = sql.replace(f' FROM {tabla} ', f' FROM "{data_source.internal_schema}"."{tabla}" ')
+            sql = sql.replace(f' FROM ds_', f' FROM "{data_source.internal_schema}"."{tabla}" ')
+            print(f"SQL corregido: {sql}")
+        
+        # Ejecutar SQL y obtener datos
+        chart_data = ejecutar_sql_para_chart(sql)
+        
+        if not chart_data or not chart_data.get("labels"):
+            return None, "La consulta no devolvió datos válidos para graficar"
+        
+        # Generar título basado en el mensaje del usuario
+        title = generar_titulo_diagrama(mensaje_usuario, data_source.name)
+        
+        # Crear diagrama temporal (no guardado aún)
+        diagrama = Diagrama(
+            data_source=data_source,
+            owner=data_source.owner,
+            title=title,
+            description=respuesta,
+            chart_type=chart_type,
+            source_type=Diagrama.CHAT,
+            sql_query=sql,
+            chart_data=chart_data,
+            order=data_source.diagramas_count if hasattr(data_source, 'diagramas_count') else 0
+        )
+        
+        return diagrama, None
+        
+    except Exception as e:
+        print(f"Error en generar_diagrama_chat: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, f"Error generando diagrama: {str(e)}"
+
+def guardar_diagrama(diagrama):
+    """
+    Guarda un diagrama temporal en la base de datos.
+    """
+    try:
+        diagrama.save()
+        return diagrama
+    except Exception as e:
+        print(f"Error guardando diagrama: {e}")
+        return None
+
+def ejecutar_sql_para_chart(sql_query):
+    """
+    Ejecuta una consulta SQL y retorna datos en formato Chart.js.
+    """
+    try:
+        engine = get_engine()
+        df = pd.read_sql(sql_query, engine)
+        
+        if df.empty or len(df.columns) < 2:
+            return None
+        
+        # Tomar primeras dos columnas como label y value
+        labels_col = df.columns[0]
+        values_col = df.columns[1]
+        
+        labels = df[labels_col].astype(str).tolist()
+        values = pd.to_numeric(df[values_col], errors='coerce').fillna(0).tolist()
+        
+        # Formato Chart.js
+        chart_data = {
+            "labels": labels,
+            "datasets": [{
+                "label": values_col,
+                "data": values,
+                "backgroundColor": [
+                    "#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6",
+                    "#06b6d4", "#f97316", "#84cc16", "#ec4899", "#6366f1"
+                ][:len(labels)],
+                "borderColor": [
+                    "#1e40af", "#dc2626", "#059669", "#d97706", "#7c3aed",
+                    "#0891b2", "#ea580c", "#65a30d", "#db2777", "#4f46e5"
+                ][:len(labels)],
+                "borderWidth": 2
+            }]
+        }
+        
+        return chart_data
+        
+    except Exception as e:
+        print(f"Error ejecutando SQL para chart: {e}")
+        return None
+
+
+
+
+
+def generar_titulo_diagrama(mensaje_usuario, archivo_nombre):
+    """
+    Genera un título descriptivo para el diagrama basado en el mensaje del usuario.
+    """
+    # Limpiar y truncar mensaje
+    mensaje_limpio = re.sub(r'[^\w\s]', '', mensaje_usuario)[:50]
+    
+    if not mensaje_limpio.strip():
+        return f"Análisis de {archivo_nombre}"
+    
+    # Capitalizar primera letra
+    titulo = mensaje_limpio.strip().capitalize()
+    
+    # Si es muy corto, agregar contexto
+    if len(titulo) < 10:
+        titulo = f"{titulo} - {archivo_nombre}"
+    
+    return titulo
+
+def obtener_diagramas_por_archivo(data_source):
+    """
+    Obtiene todos los diagramas activos de un archivo, ordenados.
+    """
+    from .models import Diagrama
+    
+    return Diagrama.objects.filter(
+        data_source=data_source,
+        is_active=True
+    ).order_by('order', 'created_at')
+
+def duplicar_diagrama(diagrama_original, nuevo_titulo=None):
+    """
+    Crea una copia de un diagrama existente.
+    """
+    from .models import Diagrama
+    
+    try:
+        nuevo_diagrama = Diagrama.objects.create(
+            data_source=diagrama_original.data_source,
+            owner=diagrama_original.owner,
+            title=nuevo_titulo or f"{diagrama_original.title} (Copia)",
+            description=diagrama_original.description,
+            chart_type=diagrama_original.chart_type,
+            source_type=Diagrama.CHAT,  # Las copias se marcan como del chat
+            sql_query=diagrama_original.sql_query,
+            chart_data=diagrama_original.chart_data.copy(),
+            chart_config=diagrama_original.chart_config.copy(),
+            order=diagrama_original.data_source.diagramas_count
+        )
+        return nuevo_diagrama
+    except Exception as e:
+        print(f"Error duplicando diagrama: {e}")
+        return None
+
+def actualizar_datos_diagrama(diagrama):
+    """
+    Re-ejecuta la consulta SQL de un diagrama y actualiza sus datos.
+    """
+    try:
+        chart_data = ejecutar_sql_para_chart(diagrama.sql_query)
+        
+        if chart_data:
+            diagrama.chart_data = chart_data
+            diagrama.save(update_fields=['chart_data', 'updated_at'])
+            return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"Error actualizando datos de diagrama: {e}")
+        return False
+
+def validar_sql_segura(sql_query):
+    """
+    Valida que la consulta SQL sea segura (solo SELECT).
+    """
+    sql_limpio = sql_query.strip().upper()
+    
+    # Debe empezar con SELECT
+    if not sql_limpio.startswith('SELECT'):
+        return False
+    
+    # No debe contener comandos peligrosos
+    comandos_prohibidos = [
+        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE',
+        'GRANT', 'REVOKE', 'TRUNCATE', 'EXECUTE', 'EXEC'
+    ]
+    
+    for comando in comandos_prohibidos:
+        if comando in sql_limpio:
+            return False
+    
+    return True
