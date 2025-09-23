@@ -10,8 +10,13 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+
 from pathlib import Path
 import os
+from dotenv import load_dotenv
+
+# Cargar variables del .env
+load_dotenv(os.path.join(Path(__file__).resolve().parent.parent, '.env'))
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,15 +26,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-6pylp6ufnzjo$-3rk1-6(m=!s=of^-4kuz2j9_t@$kfx=_sra$'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-6pylp6ufnzjo$-3rk1-6(m=!s=of^-4kuz2j9_t@$kfx=_sra$')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBlTTrJVms7u1AbkNsWogoiQgkLVDIxSbs")
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
@@ -95,11 +100,11 @@ WSGI_APPLICATION = 'Software2_BI.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'software2_DB',       # Nombre de la base que creaste
-        'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'openpg', # Contraseña del usuario
-        'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'NAME': os.getenv('DB_NAME', 'software2_DB'),
+        'USER': os.getenv('DB_USER', 'postgres'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -157,8 +162,8 @@ EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'solizfarydmarquez@gmail.com'
-EMAIL_HOST_PASSWORD = 'kxbodoimtkqrncdi'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 # Límites aumentados para PDFs grandes

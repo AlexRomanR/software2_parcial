@@ -48,6 +48,8 @@ def import_csv_or_excel(file_path: str, schema: str, table: str):
     df.to_sql(table, engine, schema=schema, if_exists="replace", index=False)
     return {"rows": len(df), "columns": list(df.columns)}
 
+# ---------- Análisis de imagen de gráficas con Gemini ----------
+
 FORBIDDEN = re.compile(
     r"\b(ALTER\s+SYSTEM|CREATE\s+USER|GRANT|REVOKE|TRUNCATE|ALTER\s+ROLE)\b",
     re.I
@@ -305,6 +307,57 @@ def import_sql_script(file_path: str, schema: str):
     main_table = next((t for t, info in meta_info.items() if info["rows"] > 0), tables[0] if tables else None)
     return tables, meta_info, main_table
 
+def analyze_chart_image(image_path: str) -> dict:
+    """
+    Envía una imagen de una gráfica a Gemini y retorna un dict estructurado:
+    {
+      summary: str,
+      insights: [str],
+      metrics: [{name: str, value: number, unit: str|null}],
+      recommended_charts: [{type: str, reason: str}]
+    }
+    """
+    if not os.path.exists(image_path):
+        raise FileNotFoundError("No se encontró la imagen a analizar")
+
+    # Configurar Gemini con la API key
+    api_key = settings.GEMINI_API_KEY
+    print(f"🔑 API Key configurada: {api_key[:10]}..." if api_key else "❌ API Key vacía")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    prompt = (
+        "Analiza la gráfica de la imagen. Devuelve SOLO JSON con las claves: "
+        "summary (string), insights (array de strings), metrics (array de objetos con name, value, unit opcional), "
+        "recommended_charts (array de objetos con type y reason). No añadas texto fuera del JSON."
+    )
+
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    resp = model.generate_content([
+        {"mime_type": "image/png", "data": image_bytes},
+        prompt,
+    ])
+    raw = getattr(resp, "text", "")
+
+    try:
+        # Si la respuesta viene en bloque markdown (```json ... ```), extraer solo el JSON
+        if raw.strip().startswith("```"):
+            # Buscar el primer y último triple backtick
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start != -1 and end != -1:
+                json_block = raw[start:end]
+                data = json.loads(json_block)
+            else:
+                raise ValueError(f"No se pudo extraer JSON de la respuesta markdown. Respuesta cruda:\n{raw}")
+        else:
+            data = json.loads(raw)
+    except Exception:
+        # Mostrar la respuesta cruda para depuración
+        raise ValueError(f"La respuesta de Gemini no fue un JSON válido. Respuesta cruda:\n{raw}")
+    return data
 def get_dataset(schema, table):
     engine = get_engine()
     query = f'SELECT * FROM "{schema}"."{table}"'

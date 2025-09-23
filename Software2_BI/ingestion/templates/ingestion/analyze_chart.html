@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Analizar gráfica con IA{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="main-card mb-3 card">
+            <div class="card-body">
+                <h5 class="card-title">Analizar gráfica con IA (Gemini)</h5>
+                <form method="post" enctype="multipart/form-data" class="mb-3">
+                    {% csrf_token %}
+                    <input type="file" name="image" accept="image/*" class="form-control mb-2" required>
+                    <button class="btn btn-primary">Analizar</button>
+                </form>
+                {% if error %}
+                <div class="alert alert-danger">{{ error }}</div>
+                {% endif %}
+                {% if result %}
+                <h6>Resumen</h6>
+                <p>{{ result.summary }}</p>
+                {% if result.insights %}
+                <h6>Insights</h6>
+                <ul>
+                    {% for it in result.insights %}<li>{{ it }}</li>{% endfor %}
+                </ul>
+                {% endif %}
+                <div class="row">
+                    <div class="col-md-6">
+                        <canvas id="chart1"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <canvas id="chart2"></canvas>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% if result %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const metrics = {{ result.metrics| safe }};
+    const labels = metrics.map(m => m.name);
+    const values = metrics.map(m => m.value);
+    new Chart(document.getElementById('chart1'), {
+        type: 'bar',
+        data: { labels, datasets: [{ label: 'Métricas', data: values, backgroundColor: '#4e79a7' }] },
+        options: { responsive: true }
+    });
+    const types = ({{ result.recommended_charts| safe }}).map(r => r.type);
+    new Chart(document.getElementById('chart2'), {
+        type: types[0] || 'pie',
+        data: { labels, datasets: [{ label: 'Recomendado', data: values, backgroundColor: '#f28e2b' }] },
+        options: { responsive: true }
+    });
+</script>
+{% endif %}
+{% endblock %}
