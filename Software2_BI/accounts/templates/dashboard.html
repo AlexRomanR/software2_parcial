@@ -1,0 +1,32 @@
+{# accounts/templates/dashboard.html #}
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-12">
+    <div class="main-card mb-3 card">
+      <div class="card-body">
+        <h5 class="card-title">Bienvenido</h5>
+        <p class="mb-0">Has iniciado sesión correctamente.</p>
+
+        <a href="http://127.0.0.1:8000/ingestion/upload/" class="btn btn-primary btn-lg mb-2 w-100">
+          Subir archivo .sql o .csv
+        </a>
+        <a href="http://127.0.0.1:8000/ingestion/list/" class="btn btn-success btn-lg mb-2 w-100">
+          Lista de archivos subidos
+        </a>
+        <a href="http://127.0.0.1:8000/ingestion/summary/" class="btn btn-info btn-lg w-100">
+          Datos de los archivos subidos
+        </a>
+        <a href="http://127.0.0.1:8000/ingestion/prueba/" class="btn btn-warning btn-lg w-100">
+          Ir al Chat
+        </a>
+        <a href="http://127.0.0.1:8000/ingestion/analyze-chart/" class="btn btn-warning btn-lg w-100 mt-2">
+          Analizar gráfica con IA
+        </a>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
