@@ -386,7 +386,7 @@ function confirmarEnvioEmail() {
     addMessage("user", text);
     userInput.value = "";
 
-    fetch("{% url 'ingestion:prueba_chat' %}", {
+    fetch("{% url 'ingestion:prueba' %}", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

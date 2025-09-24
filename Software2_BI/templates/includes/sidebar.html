@@ -41,6 +41,7 @@
 
         <li class="nav-item">
           <a class="nav-link text-dark {% active_exact 'ingestion:prueba_chat' %}" href="{% url 'ingestion:prueba_chat' %}">
+
             <i class="material-symbols-rounded opacity-5">table_view</i>
             <span class="nav-link-text ms-1">Ir al Chat</span>
           </a>
@@ -50,6 +51,13 @@
           <a class="nav-link text-dark {% active_namespace 'prep' %}" href="{% url 'prep:schema_index' %}">
             <i class="material-symbols-rounded opacity-5">database</i>
             <span class="nav-link-text ms-1">Editar base</span>
+          </a>
+        </li>
+
+        <li class="nav-item">
+          <a class="nav-link text-dark {% active_namespace 'notifications' %}" href="{% url 'notifications:dashboard' %}">
+            <i class="material-symbols-rounded opacity-5">notification_important</i>
+            <span class="nav-link-text ms-1">Sistema de Alertas</span>
           </a>
         </li>
 

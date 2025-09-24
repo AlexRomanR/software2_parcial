@@ -370,7 +370,7 @@ def get_schema_info(schema: str, preview_rows: int = 5):
     return info
 
 
-genai.configure(api_key=settings.GEMINI_API_KEY)
+# Configuración de Gemini se hace en cada función que la usa
 
 
 def reduce_schema(esquema_full: dict) -> dict[str, list[str]]:
@@ -449,6 +449,8 @@ REGLAS IMPORTANTES:
 {{ "ask": "Pregunta concreta para obtener lo que falta." }}
 """
 
+    # Configurar Gemini con la API key
+    genai.configure(api_key=settings.GEMINI_API_KEY)
     model = genai.GenerativeModel("gemini-1.5-flash")
     resp = model.generate_content(prompt)
     raw_text = getattr(resp, "text", str(resp))
@@ -1351,3 +1353,50 @@ def validar_sql_segura(sql_query):
             return False
     
     return True
+
+# ---------- Análisis de imagen de gráficas con Gemini ----------
+def analyze_chart_image(image_path: str) -> dict:
+    """
+    Envía una imagen de una gráfica a Gemini y retorna un dict estructurado:
+    {
+      summary: str,
+      insights: [str],
+      metrics: [{name: str, value: number, unit: str|null}],
+      recommended_charts: [{type: str, reason: str}]
+    }
+    """
+    if not os.path.exists(image_path):
+        raise FileNotFoundError("No se encontró la imagen a analizar")
+
+    # Configurar Gemini con la API key
+    api_key = settings.GEMINI_API_KEY
+    print(f"🔑 API Key configurada: {api_key[:10]}..." if api_key else "❌ API Key vacía")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    prompt = (
+        "Analiza la gráfica de la imagen. Devuelve SOLO JSON con las claves: "
+        "summary (string), insights (array de strings), metrics (array de objetos con name, value, unit opcional), "
+        "recommended_charts (array de objetos con type y reason). No añadas texto fuera del JSON."
+    )
+
+    with open(image_path, "rb") as f:
+        image_bytes = f.read()
+
+    resp = model.generate_content([
+        {"mime_type": "image/png", "data": image_bytes},
+        prompt,
+    ])
+    raw = getattr(resp, "text", "")
+
+    block = _extract_json_block(raw) or raw
+    try:
+        data = json.loads(block)
+    except Exception:
+        data = {"summary": raw.strip()[:500], "insights": [], "metrics": [], "recommended_charts": []}
+
+    data.setdefault("summary", "")
+    data.setdefault("insights", [])
+    data.setdefault("metrics", [])
+    data.setdefault("recommended_charts", [])
+    return data
