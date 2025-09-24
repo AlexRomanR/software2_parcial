@@ -26,7 +26,6 @@ SECRET_KEY = 'django-insecure-6pylp6ufnzjo$-3rk1-6(m=!s=of^-4kuz2j9_t@$kfx=_sra$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBlTTrJVms7u1AbkNsWogoiQgkLVDIxSbs")
 
 ALLOWED_HOSTS = []
@@ -98,9 +97,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': '11310598', # Contraseña del usuario
+
+        'PASSWORD': 'root', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'PORT': '5432',            # Puerto por defecto de PostgreSQL
     }
 }
 
@@ -153,12 +153,14 @@ LOGIN_REDIRECT_URL = "dashboard"     # cámbialo a donde quieras aterrizar
 LOGOUT_REDIRECT_URL = "login"
 
 
+EMAIL_HOST_USER = 'solizfarydmarquez@gmail.com'
+EMAIL_HOST_PASSWORD = 'kxbodoimtkqrncdi'
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-# Configuración de email para alertas
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'  # o tu proveedor
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'j.d.guior010602@gmail.com'
-EMAIL_HOST_PASSWORD = 'mdzw spef tbvy ryea'
-DEFAULT_FROM_EMAIL = 'Sistema BI <j.d.guior010602@gmail.com>'
+# Límites aumentados para PDFs grandes
+DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_HTTPONLY = False
+
