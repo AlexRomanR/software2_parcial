@@ -28,6 +28,7 @@ urlpatterns = [
     path("", dashboard_view, name="dashboard"),
     path("accounts/", include("accounts.urls")),
     path("prep/", include(("prep.urls", "prep"), namespace="prep")),
+    path('notifications/', include('notifications.urls', namespace='notifications')),
 ]
 if settings.DEBUG:
     urlpatterns += staticfiles_urlpatterns()

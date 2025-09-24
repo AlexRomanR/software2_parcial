@@ -9,7 +9,9 @@ urlpatterns = [
     path("summary/", user_data_summary_view, name="user_summary"), 
     path("delete-source/<int:source_id>/", delete_source, name="delete_source"),
     path("download-schema/<int:source_id>/", download_schema, name="download_schema"),
+
     path("prueba/", prueba_chat_view, name="prueba_chat"),
     path("enviar-email/", enviar_email_view, name="enviar_email"),
     path("analyze-chart/", analyze_chart_view, name="analyze_chart"),
+
 ]

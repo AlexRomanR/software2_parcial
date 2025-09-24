@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Crear KPI{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-2">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card">
+        <div class="card-header">
+          <h6 class="mb-0">Crear Nuevo KPI</h6>
+        </div>
+        <div class="card-body">
+          <form method="post">
+            {% csrf_token %}
+            
+            <div class="row">
+              <div class="col-md-12 mb-3">
+                <label for="{{ form.name.id_for_label }}" class="form-label">Nombre del KPI</label>
+                {{ form.name }}
+                {% if form.name.errors %}
+                  <div class="text-danger text-sm">{{ form.name.errors.0 }}</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-12 mb-3">
+                <label for="{{ form.description.id_for_label }}" class="form-label">Descripción</label>
+                {{ form.description }}
+                {% if form.description.errors %}
+                  <div class="text-danger text-sm">{{ form.description.errors.0 }}</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label for="{{ form.data_source.id_for_label }}" class="form-label">Fuente de Datos</label>
+                {{ form.data_source }}
+                {% if form.data_source.errors %}
+                  <div class="text-danger text-sm">{{ form.data_source.errors.0 }}</div>
+                {% endif %}
+              </div>
+              <div class="col-md-6 mb-3">
+                <label for="{{ form.metric_type.id_for_label }}" class="form-label">Tipo de Métrica</label>
+                {{ form.metric_type }}
+                {% if form.metric_type.errors %}
+                  <div class="text-danger text-sm">{{ form.metric_type.errors.0 }}</div>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-12 mb-3">
+                <label for="{{ form.column_name.id_for_label }}" class="form-label">Columna a Medir</label>
+                {{ form.column_name }}
+                {% if form.column_name.errors %}
+                  <div class="text-danger text-sm">{{ form.column_name.errors.0 }}</div>
+                {% endif %}
+                <small class="text-muted">Selecciona primero una fuente de datos</small>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-12">
+                <button type="submit" class="btn btn-success">
+                  <i class="material-symbols-rounded me-2">save</i>Crear KPI
+                </button>
+                <a href="{% url 'notifications:dashboard' %}" class="btn btn-secondary">
+                  <i class="material-symbols-rounded me-2">arrow_back</i>Cancelar
+                </a>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dataSourceSelect = document.getElementById('id_data_source');
+    const columnSelect = document.getElementById('id_column_name');
+    
+    dataSourceSelect.addEventListener('change', function() {
+        const dataSourceId = this.value;
+        
+        if (!dataSourceId) {
+            columnSelect.innerHTML = '<option value="">Selecciona primero una fuente de datos</option>';
+            return;
+        }
+        
+        // Mostrar loading
+        columnSelect.innerHTML = '<option value="">Cargando columnas...</option>';
+        
+        // Hacer petición AJAX
+        fetch(`{% url 'notifications:get_columns_ajax' %}?data_source_id=${dataSourceId}`)
+            .then(response => response.json())
+            .then(data => {
+                columnSelect.innerHTML = '<option value="">Selecciona una columna</option>';
+                
+                data.columns.forEach(column => {
+                    const option = document.createElement('option');
+                    option.value = column;
+                    option.textContent = column;
+                    columnSelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                columnSelect.innerHTML = '<option value="">Error cargando columnas</option>';
+            });
+    });
+});
+</script>
+{% endblock %}
