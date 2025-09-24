@@ -1,8 +1,16 @@
 from django.urls import path
-from .views import upload_dataset_view, list_sources_view, chart_view,user_data_summary_view, delete_source, download_schema, prueba_chat_view
-from .views import upload_dataset_view, list_sources_view, chart_view, user_data_summary_view, delete_source, download_schema, prueba_chat_view, enviar_email_view, analyze_chart_view
+from .views import (
+    # Vistas existentes
+    upload_dataset_view, list_sources_view, chart_view, user_data_summary_view, 
+    delete_source, download_schema, prueba_chat_view, enviar_email_view,
+    # Nuevas vistas para diagramas
+    dashboard_view, chat_integrado_view, guardar_diagrama_view, 
+    listar_diagramas_view, eliminar_diagrama_view, actualizar_diagrama_view, analyze_chart_view
+)
+
 app_name = "ingestion"
 urlpatterns = [
+    # URLs existentes (sin cambios)
     path("upload/", upload_dataset_view, name="upload"),
     path("list/", list_sources_view, name="list"),
     path("chart/<int:source_id>/", chart_view, name="chart"),
@@ -12,6 +20,16 @@ urlpatterns = [
 
     path("prueba/", prueba_chat_view, name="prueba_chat"),
     path("enviar-email/", enviar_email_view, name="enviar_email"),
+    
+    # NUEVAS URLs para sistema de diagramas
+    path("dashboard/<int:source_id>/", dashboard_view, name="dashboard_view"),
+    path("api/chat-integrado/", chat_integrado_view, name="chat_integrado"),
+    path("api/guardar-diagrama/", guardar_diagrama_view, name="guardar_diagrama"),
+    path("diagramas/<int:source_id>/", listar_diagramas_view, name="listar_diagramas"),
+    path("eliminar-diagrama/<int:diagrama_id>/", eliminar_diagrama_view, name="eliminar_diagrama"),
+    path("api/actualizar-diagrama/<int:diagrama_id>/", actualizar_diagrama_view, name="actualizar_diagrama"),
+
     path("analyze-chart/", analyze_chart_view, name="analyze_chart"),
 
 ]
+
