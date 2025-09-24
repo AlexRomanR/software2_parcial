@@ -97,9 +97,9 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'root', # Contraseña del usuario
+        'PASSWORD': 'openpg', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5432',            # Puerto por defecto de PostgreSQL
+        'PORT': '5433',            # Puerto por defecto de PostgreSQL
     }
 }
 
@@ -150,6 +150,11 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"     # cámbialo a donde quieras aterrizar
 LOGOUT_REDIRECT_URL = "login"
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
 
 
 EMAIL_HOST_USER = 'solizfarydmarquez@gmail.com'

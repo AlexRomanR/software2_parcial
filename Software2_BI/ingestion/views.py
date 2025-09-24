@@ -131,13 +131,16 @@ def delete_source(request, source_id):
     table = dataset.source.internal_table
 
     with connection.cursor() as cursor:
-        # 1) Borrar el esquema y su contenido
-        cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE;')
-
-        # 2) Borrar registros de las tablas asociadas a este dataset
+        # 1) Borrar primero los registros dependientes
+        cursor.execute("DELETE FROM ingestion_diagrama WHERE data_source_id = %s;", [dataset.source.id])
         cursor.execute("DELETE FROM ingestion_uploadeddataset WHERE id = %s;", [dataset.id])
-        cursor.execute("DELETE FROM ingestion_datasource WHERE id = %s;", [dataset.source.id])
         cursor.execute("DELETE FROM ingestion_externalconnection WHERE source_id = %s;", [dataset.source.id])
+
+        # 2) Ahora sí podemos borrar el DataSource
+        cursor.execute("DELETE FROM ingestion_datasource WHERE id = %s;", [dataset.source.id])
+
+        # 3) Borrar el esquema asociado (tablas dinámicas del archivo)
+        cursor.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE;')
 
     return redirect("dashboard")  # Ajusta a la vista a la que quieras volver
 
@@ -385,10 +388,14 @@ def chat_integrado_view(request):
         source = get_object_or_404(DataSource, id=source_id, owner=request.user)
         
         # Generar diagrama usando el chat
-        diagrama, error = generar_diagrama_chat(source, mensaje)
+        diagrama, error, ask = generar_diagrama_chat(source, mensaje)
         
         if error:
-            return JsonResponse({"error": error}, status=400)
+            return JsonResponse({"error": error}, status=200)
+        
+        if ask:
+            return JsonResponse({"success": True, "ask": ask}, status=200)
+
         
         # Retornar datos del diagrama para preview
         return JsonResponse({
@@ -400,7 +407,7 @@ def chat_integrado_view(request):
                 "chart_data": diagrama.chart_data,
                 "sql_query": diagrama.sql_query
             }
-        })
+        }, status=200)
         
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

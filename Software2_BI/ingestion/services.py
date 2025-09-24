@@ -436,8 +436,8 @@ INSTRUCCIÓN DEL USUARIO:
 \"\"\"{mensaje_usuario}\"\"\"
 
 REGLAS IMPORTANTES:
+- Puedes usar cualquier estructura SQL (JOIN, subconsultas, ventanas, date_trunc, etc.).
 - Solo usa tablas y columnas que existan en el esquema. Si el nombre pedido no existe, elige la más similar.
-- Si usas GROUP BY, todas las demás columnas deben usar agregación (SUM, COUNT, AVG, etc.).
 - La consulta debe ser válida en PostgreSQL.
 - Si NO tienes suficiente información (falta métrica, dimensión o periodo), NO inventes SQL: devuelve una pregunta de seguimiento en el campo "ask".
 - Siempre responde SOLO en JSON válido:
@@ -1072,136 +1072,163 @@ def _humanizar_nombre(nombre_columna):
             palabras_capitalizadas.append(palabra.capitalize())
     
     return ' '.join(palabras_capitalizadas)
-    
+
 def generar_diagrama_chat(data_source, mensaje_usuario):
     """
-    Genera un diagrama usando el chat, específico para un archivo.
-    CORREGIDO: Usa esquema completo y columnas reales.
-    Retorna (diagrama_obj, error_msg)
+    ✅ Versión conversacional:
+      - Si falta info => devuelve ask
+      - Si hay suficiente => devuelve diagrama listo
+      - En errores => error
+    Retorna: (diagrama_obj | None, error_msg | None, ask | None)
     """
     from .models import Diagrama
-    
-    if not data_source.internal_schema or not data_source.internal_table:
-        return None, "El archivo no tiene datos válidos"
-    
+
+    if not data_source.internal_schema:
+        return None, "El archivo no tiene datos válidos", None
+    schema = data_source.internal_schema
+    tabla_default = data_source.internal_table  # fallback
     try:
-        # Obtener esquema específico del archivo
-        esquema_info = get_schema_info(data_source.internal_schema)
-        tabla = data_source.internal_table
-        info_tabla = esquema_info.get(tabla, {})
-        columnas = info_tabla.get("columns", [])
-        
-        if not columnas:
-            return None, "No se pudo analizar la estructura del archivo"
-        
-        print(f"DEBUG Chat - Esquema: {data_source.internal_schema}")
-        print(f"DEBUG Chat - Tabla: {tabla}")
-        print(f"DEBUG Chat - Columnas: {columnas}")
-        
-        # PROMPT CORREGIDO que fuerza uso de esquema completo
-        prompt_corregido = f"""
-Eres un asistente experto en SQL para PostgreSQL.
+        # 1) Traer TODO el esquema (todas las tablas del schema)
+        esquema_info = get_schema_info(schema)          # {tabla: {columns:[...], rows:...}, ...}
+        if not esquema_info:
+            return None, "No se pudo analizar la estructura del esquema", None
 
-INFORMACIÓN OBLIGATORIA:
-- Esquema: {data_source.internal_schema}
-- Tabla: {tabla}
-- Columnas disponibles: {columnas}
+        # Reducido: {tabla: [col1, col2, ...]}
+        esquema_reducido = reduce_schema({
+            t: info.get("columns", [])
+            for t, info in esquema_info.items()
+        })
 
-REGLAS ESTRICTAS DE SQL:
-1. SIEMPRE usar: FROM "{data_source.internal_schema}"."{tabla}"
-2. SIEMPRE usar comillas dobles en nombres de columnas: "Category", "Price", "Name"
-3. El resultado DEBE tener exactamente: SELECT columna as label, valor as value
-4. Solo usar columnas que existen en la lista: {columnas}
+        # 2) Saludo / ejemplos
+        if not mensaje_usuario or mensaje_usuario.strip().lower() in {"hola", "buenas", "hello", "hey"}:
+            # arma ejemplos con LA PRIMERA TABLA QUE TENGA COLUMNAS
+            ejemplos = []
+            for t, cols in esquema_reducido.items():
+                if len(cols) >= 2:
+                    ejemplos.append(f"Total de {cols[1]} por {cols[0]} en {t}")
+                elif len(cols) == 1:
+                    ejemplos.append(f"Conteo de {cols[0]} en {t}")
+                if len(ejemplos) >= 2:
+                    break
+            ejemplos_texto = " o ".join([f"'{e}'" for e in ejemplos]) if ejemplos else "'Conteo por categoría en alguna tabla'"
+            return None, None, f"¡Hola! Dime qué quieres ver. Por ejemplo: {ejemplos_texto}."
 
-MENSAJE DEL USUARIO:
-"{mensaje_usuario}"
+        # 3) Prompt: que ELIJA TABLA y devuelva "tabla"
+        prompt = f"""
+Eres un asistente que genera SQL para PostgreSQL y sugiere un tipo de gráfico.
 
-IMPORTANTE: 
-- Si pregunta por "categoría" o "category", usar la columna "Category"
-- Si pregunta por "precio" o "price", usar la columna "Price" 
-- Si pregunta por "marca" o "brand", usar la columna "Brand"
-- Si pregunta por "stock" o "inventario", usar la columna "Stock"
+ESQUEMA (resumido: {{tabla: [columnas...]}}):
+{json.dumps(esquema_reducido, ensure_ascii=False)}
 
-FORMATO DE RESPUESTA (solo JSON válido):
-{{
-  "sql": "SELECT \"columna_exacta\" as label, COUNT(*) as value FROM \"{data_source.internal_schema}\".\"{tabla}\" WHERE \"columna_exacta\" IS NOT NULL GROUP BY \"columna_exacta\" ORDER BY value DESC LIMIT 15",
-  "grafico": "bar|line|pie",
-  "respuesta": "Descripción breve del análisis"
-}}
+INSTRUCCIÓN DEL USUARIO:
+\"\"\"{mensaje_usuario}\"\"\"
 
-Ejemplo correcto:
-{{
-  "sql": "SELECT \"Category\" as label, COUNT(*) as value FROM \"{data_source.internal_schema}\".\"{tabla}\" GROUP BY \"Category\" ORDER BY value DESC",
-  "grafico": "pie",
-  "respuesta": "Distribución de productos por categoría"
-}}
+
+
+REGLAS IMPORTANTES:
+- Puedes usar UNA o MÁS tablas si es necesario (JOIN).
+- Usa JOIN cuando la métrica (p. ej., "cantidad de inscripciones por curso") implique contar registros en una tabla hija (FK) agrupando por la tabla maestra.
+- Siempre usa columnas reales del esquema.
+- Si usas GROUP BY, todas las demás columnas deben estar agregadas (COUNT, SUM, AVG...).
+- La consulta debe ser válida en PostgreSQL.
+- El FROM debe ser: FROM "{schema}"."NOMBRE_TABLA_ELEGIDA"
+- Usa SIEMPRE comillas dobles para identificadores: "columna".
+- Si NO tienes suficiente información (falta métrica, dimensión o periodo, o no está clara la tabla), NO inventes SQL: devuelve "ask".
+- Si la intención es contar entidades relacionadas (p. ej., inscripciones por curso), prefiere contar registros en la tabla hija (la que tiene la FK) usando JOIN con la tabla maestra, en vez de COUNT(*) sobre la tabla maestra.
+
+Responde SOLO en JSON válido:
+
+1) Completo:
+{{ "tabla": "nombre_tabla", "sql": "SELECT ...", "grafico": "bar|line|pie|doughnut|scatter", "respuesta": "Descripción de la grafica", "titulo": "Título del gráfico"}}
+
+2) Falta info:
+{{ "ask": "Pregunta concreta para obtener lo que falta (tabla/métrica/dimensión/periodo)." }}
 """
-        
-        # Llamar a Gemini con prompt corregido
-        import google.generativeai as genai
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-1.5-flash")
-        resp = model.generate_content(prompt_corregido)
+        resp = model.generate_content(prompt)
         raw_text = getattr(resp, "text", str(resp))
-        
-        print("===== RESPUESTA GEMINI CHAT =====")
+        print("===== RESPUESTA CRUDA GEMINI (chat integrado) =====")
         print(raw_text)
-        print("==================================")
-        
-        # Extraer JSON
+        print("====================================================")
+
         json_block = _extract_json_block(raw_text)
         if not json_block:
-            return None, "No se pudo generar una consulta válida"
-        
+            return None, None, "¿Sobre qué tabla trabajamos y qué métrica/dimensión/periodo necesitas?"
+
         try:
             data = json.loads(json_block)
-        except json.JSONDecodeError:
-            return None, "Respuesta inválida de la IA"
-        
+        except Exception:
+            return None, None, "La respuesta no fue clara. Indica tabla, métrica, dimensión y periodo."
+
+
+
+        if "ask" in data and not data.get("sql"):
+            return None, None, (data.get("ask") or "¿Qué tabla, métrica, dimensión y periodo necesitas?")
+
+
+        # 5) Caso completo
+        tabla_elegida = (data.get("tabla") or "").strip()
+        if not tabla_elegida:
+            if not data.get("sql"):
+                return None, None, "¿En qué tabla del esquema debo buscar?"
+            tabla_elegida = tabla_default
+
+        # Validar que exista
+        if tabla_elegida not in esquema_info:
+            # Si el usuario mencionó algo, pregunta por la tabla correcta
+            return None, None, f'No encuentro la tabla "{tabla_elegida}". ¿Cuál de estas quieres usar? {", ".join(sorted(esquema_info.keys())[:10])}'
+
         sql = data.get("sql")
-        chart_type = data.get("grafico", "bar")
-        respuesta = data.get("respuesta", "Análisis generado")
-        
+        chart_type = (data.get("grafico") or "bar").lower()
+        titulo = data.get("titulo")
+        respuesta = data.get("respuesta") or "Aquí tienes el análisis."
+
+
         if not sql:
-            return None, "No se pudo generar consulta SQL"
-        
-        print(f"SQL generado: {sql}")
-        
-        # VALIDAR que el SQL use el esquema correcto
-        if f'"{data_source.internal_schema}"."{tabla}"' not in sql:
-            # CORREGIR automáticamente si no usa esquema completo
-            sql = sql.replace(f' FROM {tabla} ', f' FROM "{data_source.internal_schema}"."{tabla}" ')
-            sql = sql.replace(f' FROM ds_', f' FROM "{data_source.internal_schema}"."{tabla}" ')
-            print(f"SQL corregido: {sql}")
-        
-        # Ejecutar SQL y obtener datos
+            return None, None, "Necesito un poco más de detalle: tabla, métrica, dimensión y periodo."
+
+        # 7) Validar/corregir FROM con esquema.tabla
+        esquema_y_tabla = f'"{schema}"."{tabla_elegida}"'
+        if esquema_y_tabla not in sql:
+            # reemplazar cualquier FROM <loquesea tabla_elegida> por el fully-qualified
+            sql = re.sub(
+                r'FROM\s+("[^"]+"\.)?"?'+re.escape(tabla_elegida)+r'"?\b',
+                f'FROM {esquema_y_tabla}',
+                sql,
+                flags=re.IGNORECASE
+            )
+            # Si no encontraba FROM de esa tabla, y hay un único FROM sin schema, intentar cualificarlo
+            if esquema_y_tabla not in sql:
+                sql = re.sub(
+                    r'FROM\s+"?([a-zA-Z_]\w*)"?\b',
+                    lambda m: f'FROM "{schema}"."{m.group(1)}"' if m.group(1) in esquema_info else m.group(0),
+                    sql,
+                    flags=re.IGNORECASE
+                )
+        # 8) Ejecutar SQL → chart_data
         chart_data = ejecutar_sql_para_chart(sql)
-        
         if not chart_data or not chart_data.get("labels"):
-            return None, "La consulta no devolvió datos válidos para graficar"
-        
-        # Generar título basado en el mensaje del usuario
-        title = generar_titulo_diagrama(mensaje_usuario, data_source.name)
-        
-        # Crear diagrama temporal (no guardado aún)
+            return None, "La consulta no devolvió datos válidos para graficar", None
+
+
         diagrama = Diagrama(
             data_source=data_source,
             owner=data_source.owner,
-            title=title,
+            title=titulo,
             description=respuesta,
             chart_type=chart_type,
             source_type=Diagrama.CHAT,
             sql_query=sql,
             chart_data=chart_data,
-            order=data_source.diagramas_count if hasattr(data_source, 'diagramas_count') else 0
+            order=getattr(data_source, 'diagramas_count', 0) or 0
         )
-        
-        return diagrama, None
-        
+        return diagrama, None, None
+
     except Exception as e:
-        print(f"Error en generar_diagrama_chat: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, f"Error generando diagrama: {str(e)}"
+        import traceback; traceback.print_exc()
+        return None, f"Error generando diagrama: {str(e)}", None
 
 def guardar_diagrama(diagrama):
     """
@@ -1371,7 +1398,6 @@ def analyze_chart_image(image_path: str) -> dict:
     # Configurar Gemini con la API key
     api_key = settings.GEMINI_API_KEY
     print(f"🔑 API Key configurada: {api_key[:10]}..." if api_key else "❌ API Key vacía")
-    genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-1.5-flash")
 
     prompt = (

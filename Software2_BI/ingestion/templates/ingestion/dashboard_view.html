@@ -223,7 +223,9 @@
         
         <div class="diagrama-actions">
           <button class="btn-small btn-update" onclick="actualizarDiagrama({{ diagrama.id }})">🔄 Actualizar</button>
-          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar</button>
+          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar como imagen</button>
+          <button class="btn-small btn-export" onclick="exportarPDF({{ diagrama.id }})">📄 Exportar como PDF</button>
+          <button class="btn-small btn-export" onclick="abrirModalEmail({{ diagrama.id }}, '{{ diagrama.title|escapejs }}')">📧 Enviar como email</button>
           {% if diagrama.source_type == 'CHAT' %}
           <a href="{% url 'ingestion:eliminar_diagrama' diagrama.id %}" class="btn-small btn-delete" onclick="return confirm('¿Eliminar este diagrama?')">🗑️ Eliminar</a>
           {% endif %}
@@ -278,7 +280,10 @@
         
         <div class="diagrama-actions">
           <button class="btn-small btn-update" onclick="actualizarDiagrama({{ diagrama.id }})">🔄 Actualizar</button>
-          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar</button>
+          <button class="btn-small btn-export" onclick="exportarDiagrama({{ diagrama.id }})">📤 Exportar como imagen</button>
+          <button class="btn-small btn-export" onclick="exportarPDF({{ diagrama.id }})">📄 Exportar como PDF</button>
+          <button class="btn-small btn-export" onclick="abrirModalEmail({{ diagrama.id }}, '{{ diagrama.title|escapejs }}')">📧 Enviar como email</button>
+
           <a href="{% url 'ingestion:eliminar_diagrama' diagrama.id %}" class="btn-small btn-delete" onclick="return confirm('¿Eliminar este diagrama?')">🗑️ Eliminar</a>
         </div>
       </div>
@@ -354,6 +359,21 @@
       </div>
     </div>
   </div>
+
+  <div id="email-modal-simple" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000;">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:30px; border-radius:10px; width:350px;">
+      <h3>📧 Enviar Gráfico por Email</h3>
+      <div style="margin:15px 0;">
+        <label>Email destinatario:</label>
+        <input type="email" id="email-destinatario-simple" placeholder="ejemplo@correo.com" style="width:100%; padding:10px; margin-top:5px; border:1px solid #ddd; border-radius:5px;">
+      </div>
+      <div style="text-align:center; margin-top:25px;">
+        <button onclick="confirmarEnvioEmail()" style="background:#4CAF50; color:white; padding:12px 25px; border:none; border-radius:5px; margin:0 10px; font-weight:bold;">📤 Enviar PDF</button>
+        <button onclick="cerrarModalSimple()" style="background:#f44336; color:white; padding:12px 25px; border:none; border-radius:5px; margin:0 10px; font-weight:bold;">❌ Cancelar</button>
+      </div>
+    </div>
+  </div>
+
 
 <script>
   const chatBox = document.getElementById("chat-box");
@@ -445,8 +465,16 @@
       if (data.error) {
         addMessage("err", data.error);
       } else if (data.success) {
-        addMessage("bot", data.diagrama.description);
-        mostrarPreview(data.diagrama);
+        if (data.ask) {
+          addMessage("bot", data.ask);
+          return;
+        }
+        if (data.diagrama) {
+          addMessage("bot", data.diagrama.description);
+          mostrarPreview(data.diagrama);
+        } else {
+          addMessage("err", "No recibí datos de diagrama.");
+        }
       }
     })
     .catch(err => addMessage("err", String(err)));
@@ -516,6 +544,127 @@
     link.click();
     addMessage("bot", "✅ Diagrama exportado como imagen");
   }
+  function exportarPDF(diagramaId) {
+    const canvas = document.getElementById(`chart-${diagramaId}`);
+    if (!canvas) return alert("❌ No se encontró el gráfico");
+
+    html2canvas(canvas, { backgroundColor: "#fff", scale: 2 }).then(canvas => {
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF("landscape");
+      pdf.setFontSize(16);
+      pdf.text(`Gráfico ${diagramaId}`, 20, 20);
+
+      const imgData = canvas.toDataURL("image/png");
+      const imgWidth = 250;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      pdf.addImage(imgData, "PNG", 20, 40, imgWidth, imgHeight);
+
+      pdf.save(`diagrama_${diagramaId}.pdf`);
+    });
+  }let canvasSeleccionado = null;
+let tituloSeleccionado = "";
+
+function abrirModalEmail(diagramaId, titulo) {
+  canvasSeleccionado = document.getElementById(`chart-${diagramaId}`);
+  tituloSeleccionado = titulo || `Gráfico ${diagramaId}`;
+  
+  if (!canvasSeleccionado) {
+    alert("No se encontró el gráfico para exportar");
+    return;
+  }
+
+  document.getElementById('email-modal-simple').style.display = 'block';
+  document.getElementById('email-destinatario-simple').focus();
+}
+
+function cerrarModalSimple() {
+  document.getElementById('email-modal-simple').style.display = 'none';
+  document.getElementById('email-destinatario-simple').value = '';
+}
+
+function confirmarEnvioEmail() {
+  const destinatario = document.getElementById('email-destinatario-simple').value;
+  
+  if (!destinatario || !destinatario.includes('@')) {
+    alert("Por favor ingresa un email válido");
+    return;
+  }
+
+  if (!canvasSeleccionado) {
+    alert("No hay gráfico seleccionado");
+    return;
+  }
+
+  cerrarModalSimple();
+  alert("⏳ Generando PDF, por favor espera...");
+
+  // Capturar el gráfico con html2canvas
+  html2canvas(canvasSeleccionado, { 
+    backgroundColor: '#ffffff', 
+    scale: 2,   // Mejora la calidad
+    useCORS: true 
+  })
+  .then(canvas => {
+    try {
+      const { jsPDF } = window.jspdf;
+      if (!jsPDF) {
+        alert("❌ jsPDF no está cargado correctamente");
+        return;
+      }
+
+      const pdf = new jsPDF('landscape');
+      pdf.setFontSize(16);
+      pdf.text(tituloSeleccionado, 20, 25);
+      pdf.setFontSize(11);
+      pdf.text(`Generado: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 20, 35);
+
+      // Convertir canvas a imagen
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
+      const imgWidth = 240;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 20, 50, imgWidth, imgHeight);
+
+      pdf.setFontSize(9);
+      pdf.text('Software2 BI', 20, pdf.internal.pageSize.height - 15);
+
+      // Convertir a base64 para enviar por backend
+      const pdfData = pdf.output('datauristring');
+      const fileName = `grafico_${Date.now()}.pdf`;
+
+      // Enviar al backend
+      fetch("{% url 'ingestion:enviar_email' %}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCookie("csrftoken"),
+        },
+        body: JSON.stringify({
+          destinatario: destinatario,
+          asunto: `Reporte: ${tituloSeleccionado}`,
+          mensaje: `Hola,\n\nAdjunto el gráfico "${tituloSeleccionado}".\n\nGenerado el ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString()}.\n\nSaludos,\nSoftware2 BI`,
+          attachment: pdfData,
+          fileName: fileName,
+          formato: 'pdf'
+        })
+      })
+      .then(resp => resp.json())
+      .then(data => {
+        if (data.success) {
+          alert(`✅ PDF enviado a ${destinatario}`);
+        } else {
+          alert(`❌ Error: ${data.error}`);
+        }
+      })
+      .catch(err => alert("❌ Error de conexión: " + err.message));
+
+    } catch (e) {
+      alert("❌ Error generando PDF: " + e.message);
+    }
+  })
+  .catch(err => alert("❌ Error al capturar el gráfico: " + err.message));
+}
+
+
 </script>
 
 </body>
