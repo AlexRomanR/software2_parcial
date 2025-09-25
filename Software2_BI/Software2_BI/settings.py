@@ -28,7 +28,7 @@ DEBUG = True
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyBlTTrJVms7u1AbkNsWogoiQgkLVDIxSbs")
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']  
 
 
 # Application definition
@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     "accounts", 
     "widget_tweaks",
     "fernet_fields",  

@@ -5,8 +5,9 @@ from .views import (
     delete_source, download_schema, prueba_chat_view, enviar_email_view,
     # Nuevas vistas para diagramas
     dashboard_view, chat_integrado_view, guardar_diagrama_view, 
-    listar_diagramas_view, eliminar_diagrama_view, actualizar_diagrama_view, analyze_chart_view
+    listar_diagramas_view, eliminar_diagrama_view, actualizar_diagrama_view, analyze_chart_view,
 )
+from  .api_views import (api_list_datasets, diagramas_por_data_source)
 
 app_name = "ingestion"
 urlpatterns = [
@@ -30,6 +31,14 @@ urlpatterns = [
     path("api/actualizar-diagrama/<int:diagrama_id>/", actualizar_diagrama_view, name="actualizar_diagrama"),
 
     path("analyze-chart/", analyze_chart_view, name="analyze_chart"),
+    path("api/datasets/<int:user_id>/", api_list_datasets, name="api_list_datasets"),
+    
+
+    path(
+        "api/diagramas/<int:data_source_id>/",
+        diagramas_por_data_source,
+        name="diagramas_por_data_source",
+    ),
 
 ]
 

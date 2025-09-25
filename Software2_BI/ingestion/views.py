@@ -28,7 +28,7 @@ from .services import get_schema_info, generar_consulta_y_grafico, reduce_schema
 from django.core.mail import EmailMessage
 from datetime import datetime
 import base64
-
+from django.views.decorators.http import require_GET
 from .services import analyze_chart_image
 @login_required
 def upload_dataset_view(request):
