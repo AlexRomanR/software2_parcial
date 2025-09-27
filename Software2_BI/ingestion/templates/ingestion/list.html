@@ -33,6 +33,10 @@
           <a href="{% url 'ingestion:dashboard_view' s.id %}" class="btn btn-primary btn-sm">
             📊 Ver Dashboard
           </a>
+
+          <a href="{% url 'ingestion:drag_drop' s.id %}" class="btn btn-outline-warning btn-sm">
+            🖱️ Drag & Drop
+          </a>
           
           <!-- Botón para chat directo (funcionalidad existente) -->
           <a href="{% url 'ingestion:chart' s.id %}" class="btn btn-outline-info btn-sm">
