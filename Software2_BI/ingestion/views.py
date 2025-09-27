@@ -30,6 +30,15 @@ from datetime import datetime
 import base64
 from django.views.decorators.http import require_GET
 from .services import analyze_chart_image
+from django.shortcuts import render, get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+import json
+import re
+
+from .models import DataSource
+from .services import get_schema_info, ejecutar_sql_para_chart
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -520,3 +529,164 @@ def analyze_chart_view(request):
             except Exception as e:
                 context["error"] = str(e)
     return render(request, "ingestion/analyze_chart.html", context)
+
+
+@login_required
+def drag_drop_view(request, source_id):
+    """
+    Página principal Drag & Drop para un DataSource.
+    """
+    source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+    # Puedes pasar info básica, el JS pedirá el esquema vía API
+    return render(request, "ingestion/drag_drop.html", {
+        "source": source
+    })
+
+@login_required
+def dragdrop_schema_api(request, source_id):
+    """
+    Devuelve {tabla: {columns:[...], rows:int}} del schema del source.
+    """
+    source = get_object_or_404(DataSource, id=source_id, owner=request.user)
+    if not source.internal_schema:
+        return JsonResponse({"error": "Este archivo no tiene schema interno"}, status=400)
+
+    esquema = get_schema_info(source.internal_schema)
+    # Reducir un poco el payload
+    out = {
+        "schema": source.internal_schema,
+        "tables": {
+            t: {"columns": info.get("columns", []), "rows": info.get("rows", 0)}
+            for t, info in esquema.items()
+        }
+    }
+    return JsonResponse(out)
+
+@csrf_exempt
+@login_required
+def dragdrop_run_api(request):
+    if request.method != "POST":
+        return JsonResponse({"success": False, "error": "Método no permitido"}, status=405)
+
+    try:
+        payload = json.loads(request.body or "{}")
+        source_id = payload.get("source_id")
+        chart_type = (payload.get("chart_type") or "").lower()
+        table = payload.get("table") or ""
+        legend = payload.get("legend") or ""
+        value = payload.get("value") or None
+        agg = (payload.get("agg") or "COUNT").upper()
+        limit = int(payload.get("limit") or 10)
+
+        src = get_object_or_404(DataSource, id=source_id, owner=request.user)
+        schema = src.internal_schema
+        if not schema or not table or not legend:
+            return JsonResponse({"success": False, "error": "Faltan parámetros (schema/tabla/leyenda)."}, status=400)
+
+        # Saneos básicos (solo para nombres; igualmente usamos comillas dobles)
+        table = sanitize_identifier(table)
+
+        # Armar expresión de agregación
+        if agg == "COUNT":
+            agg_expr = "COUNT(*)"
+            value_label = "count"
+            value_not_null = ""
+        else:
+            if not value:
+                return JsonResponse({"success": False, "error": "Para SUM/AVG/MIN/MAX se requiere 'value'."}, status=400)
+            agg_expr = f'{agg}("{value}")'
+            value_label = f"{agg.lower()}({value})"
+            value_not_null = f' AND "{value}" IS NOT NULL'
+
+        engine = get_engine()
+        with engine.begin() as conn:
+
+            if chart_type == "scatter":
+                # Detectar tipo de la columna leyenda (X)
+                dtype = conn.execute(text("""
+                    SELECT data_type 
+                    FROM information_schema.columns
+                    WHERE table_schema = :s AND table_name = :t AND column_name = :c
+                """), {"s": schema, "t": table, "c": legend}).scalar() or ""
+
+                numeric_types = {"integer","bigint","numeric","real","double precision","decimal","smallint"}
+                if dtype.lower() in numeric_types:
+                    x_expr = f'"{legend}"'
+                else:
+                    # Casteo seguro si la leyenda es texto con números
+                    x_expr = f"""
+                        CASE 
+                        WHEN "{legend}" ~ '^[+-]?[0-9]*\\.?[0-9]+$' THEN ("{legend}")::numeric 
+                        ELSE NULL 
+                        END
+                    """
+
+                # Para SUM/AVG/MIN/MAX requerimos value; para COUNT no
+                if agg != "COUNT" and not value:
+                    return JsonResponse({"success": False, "error": "Para SUM/AVG/MIN/MAX se requiere 'value'."}, status=400)
+
+                # Construir SQL con CTE y filtrar alias en la capa externa
+                sql = f"""
+                    WITH pts AS (
+                        SELECT
+                            {x_expr} AS x,
+                            {agg_expr} AS y
+                        FROM "{schema}"."{table}"
+                        WHERE "{legend}" IS NOT NULL {value_not_null}
+                        GROUP BY 1
+                    )
+                    SELECT x, y
+                    FROM pts
+                    WHERE x IS NOT NULL
+                    ORDER BY x
+                    LIMIT :lim
+                """
+
+                rows = conn.execute(text(sql), {"lim": limit}).fetchall()
+                points = []
+                for r in rows:
+                    x, y = r[0], r[1]
+                    if x is None or y is None:
+                        continue
+                    try:
+                        points.append({"x": float(x), "y": float(y)})
+                    except Exception:
+                        continue
+
+                if not points:
+                    return JsonResponse({"success": False, "error": "Sin puntos válidos para scatter (¿leyenda numérica?)"})
+
+                chart_data = {
+                    "datasets": [{
+                        "label": value_label,  # p.ej. 'count' o 'sum(col)'
+                        "data": points
+                    }]
+                }
+                return JsonResponse({"success": True, "chart_type": "scatter", "chart_data": chart_data})
+                    
+
+            # ---- Resto de tipos (bar/line/pie/doughnut/radar): labels + values ----
+            sql = f"""
+                SELECT "{legend}" AS label, {agg_expr} AS value
+                FROM "{schema}"."{table}"
+                WHERE "{legend}" IS NOT NULL {value_not_null}
+                GROUP BY "{legend}"
+                ORDER BY value DESC
+                LIMIT :lim
+            """
+            rows = conn.execute(text(sql), {"lim": limit}).fetchall()
+            labels = [str(r[0]) for r in rows]
+            values = [float(r[1]) if r[1] is not None else 0 for r in rows]
+
+            chart_data = {
+                "labels": labels,
+                "datasets": [{
+                    "label": value_label,
+                    "data": values
+                }]
+            }
+            # radar usa este mismo formato
+            return JsonResponse({"success": True, "chart_type": chart_type, "chart_data": chart_data, "sql": sql,})
+
+    except Exception as e:
+        return JsonResponse({"success": False, "error": str(e)}, status=500)

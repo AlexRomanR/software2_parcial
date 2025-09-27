@@ -1146,7 +1146,7 @@ Responde SOLO en JSON válido:
 """
 
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         resp = model.generate_content(prompt)
         raw_text = getattr(resp, "text", str(resp))
         print("===== RESPUESTA CRUDA GEMINI (chat integrado) =====")
