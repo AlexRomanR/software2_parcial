@@ -51,7 +51,8 @@ INSTALLED_APPS = [
     "ingestion",      
     "prep",
     "core",
-    "notifications"
+    "notifications",
+    "ml",
 ]
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -100,7 +101,7 @@ DATABASES = {
         'USER': 'postgres',        # Usuario de tu PostgreSQL
         'PASSWORD': 'openpg', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
-        'PORT': '5433',            # Puerto por defecto de PostgreSQL
+        'PORT': '5432',            # Puerto por defecto de PostgreSQL
     }
 }
 

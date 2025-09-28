@@ -14,7 +14,8 @@ from .views import (
     delete_rows,
     insert_rows,
     nulls_action,
-    calc_newcol
+    calc_newcol,
+    ai_cleaning_suggest, ai_cleaning_apply
 )
 
 app_name = "prep"
@@ -28,6 +29,8 @@ urlpatterns = [
     path("api/<slug:schema>/<slug:table>/update/", update_rows, name="update"),
     path("api/<slug:schema>/<slug:table>/delete/", delete_rows, name="delete"),
     path("api/<slug:schema>/<slug:table>/insert/", insert_rows, name="insert"),
+    path("<str:schema>/<str:table>/ai/suggest", ai_cleaning_suggest, name="ai_suggest"),
+    path("<str:schema>/<str:table>/ai/apply", ai_cleaning_apply, name="ai_apply"),
     # ya tienes:
     path("api/<slug:schema>/<slug:table>/rename/", rename_columns, name="rename"),
     path("api/<slug:schema>/<slug:table>/cast/", cast_columns, name="cast"),
