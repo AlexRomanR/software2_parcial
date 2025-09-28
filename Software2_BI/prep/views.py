@@ -2,7 +2,7 @@
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import render, redirect
-from django.views.decorators.http import require_http_methods
+from django.views.decorators.http import require_http_methods, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from sqlalchemy import text, inspect
 import pandas as pd
@@ -10,9 +10,41 @@ import json
 from django.db import connection
 from datetime import datetime, date, time
 import re
+import os
+from django.conf import settings
+import google.generativeai as genai
 
 from ingestion.models import DataSource
-from ingestion.services import get_engine  # ya lo tienes
+from ingestion.services import get_engine  
+
+from datetime import datetime, date, time
+from decimal import Decimal
+from uuid import UUID
+
+def _to_jsonable(v):
+    if isinstance(v, (datetime, date, time)):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (UUID, )):
+        return str(v)
+    # opcional: memoryview → str/bytes
+    if isinstance(v, memoryview):
+        try:
+            return v.tobytes().decode("utf-8", "ignore")
+        except Exception:
+            return v.tobytes()
+    return v
+
+def _jsonify(obj):
+    if isinstance(obj, dict):
+        return {k: _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonable(x) for x in obj]
+    return _to_jsonable(obj)
+
+# alias para menos tecleo si prefieres
+_jsonable = _jsonify
 
 def get_column_types(conn, schema, table):
     """
@@ -713,3 +745,382 @@ def nulls_action(request, schema, table):
 @require_http_methods(["POST"])
 def calc_newcol(request, schema, table):
     return add_calculated(request, schema, table)
+
+
+ALLOWED_OPS = {
+    "rename",            # {mapping:{old:new,...}}
+    "cast",              # {types:{col:type,...}}
+    "fill_nulls",        # {cols:[...], value:any}
+    "drop_nulls",        # {cols:[...]}
+    "add_calculated",    # {new_col:str, expr:str}
+    "trim",              # {cols:[...]}
+    "lower",             # {cols:[...]}
+    "upper",             # {cols:[...]}
+    "regex_replace",     # {col:str, pattern:str, repl:str}
+}
+
+def _schema_summary(conn, schema, table, sample_size=20):
+    # columnas y tipos
+    cols = conn.execute(text("""
+        SELECT column_name, data_type
+        FROM information_schema.columns
+        WHERE table_schema=:s AND table_name=:t
+        ORDER BY ordinal_position
+    """), {"s": schema, "t": table}).fetchall()
+    columns = [{"name": r[0], "type": r[1]} for r in cols]
+
+    # muestra opcional
+    sample = []
+    if sample_size and sample_size > 0:
+        res = conn.execute(text(
+            f'SELECT * FROM {qi(schema)}.{qi(table)} LIMIT :n'
+        ), {"n": sample_size})
+        for row in res.mappings():
+            sample.append(dict(row))
+
+    return {"columns": columns, "sample": sample}
+
+def _ai_prompt(schema, table, summary, guardrails):
+    cols_text = "\n".join([f"- {c['name']}: {c['type']}" for c in summary["columns"]])
+    return f"""
+Eres un asistente de preparación de datos en PostgreSQL. Recibirás el esquema de una tabla y (opcional) una muestra.
+
+SOLO puedes responder con un JSON con esta forma:
+{{
+  "intent": "string",
+  "operations": [
+    // Ejemplos válidos:
+    {{"op":"trim","cols":["col1","col2"]}},
+    {{"op":"lower","cols":["col1"]}},
+    {{"op":"upper","cols":["col2"]}},
+    {{"op":"regex_replace","col":"col1","pattern":"\\\\s+","repl":" "}},
+    {{"op":"rename","mapping":{{"old":"new"}}}},
+    {{"op":"cast","types":{{"col":"INTEGER|DOUBLE PRECISION|TEXT|DATE|TIME|TIMESTAMP|NUMERIC(10,2)"}}}},
+    {{"op":"fill_nulls","cols":["c1","c2"],"value":"Desconocido"}},
+    {{"op":"drop_nulls","cols":["c1"]}},
+    {{
+      "op":"add_calculated",
+      "new_col":"duracion_minutos",
+      "type":"DOUBLE PRECISION",
+      "unit":"minutes",
+      "expr":"EXTRACT(EPOCH FROM ((hora_fin - hora_inicio) + CASE WHEN hora_fin < hora_inicio THEN INTERVAL '24 hours' ELSE INTERVAL '0' END)) / 60.0"
+    }},
+    {{
+      "op":"add_calculated",
+      "new_col":"duracion_intervalo",
+      "type":"INTERVAL",
+      "expr":"(hora_fin - hora_inicio) + CASE WHEN hora_fin < hora_inicio THEN INTERVAL '24 hours' ELSE INTERVAL '0' END"
+    }}
+  ]
+}}
+
+REGLAS IMPORTANTES (PostgreSQL):
+1) Si usas "add_calculated" con "type" NUMÉRICO (p. ej. "DOUBLE PRECISION", "NUMERIC", "REAL", "DECIMAL"), la "expr" DEBE ser NUMÉRICA. 
+   - Para diferencias de tiempo, usa siempre: EXTRACT(EPOCH FROM (...))  → segundos.
+   - Si "unit" = "minutes", divide entre 60.0; si "hours", entre 3600.0.
+   - NUNCA uses "hora_fin - hora_inicio" directo si el "type" es numérico (eso devuelve INTERVAL).
+2) Si "type" = "INTERVAL", entonces sí puedes usar "(hora_fin - hora_inicio)" (ajustando medianoche si aplica).
+3) Considera cruce de medianoche: si "hora_fin" < "hora_inicio", suma INTERVAL '24 hours' al resultado.
+4) Si las columnas de hora pudieran ser TEXT, castea con "::time" dentro de la expresión.
+   Ej.: EXTRACT(EPOCH FROM ((hora_fin::time - hora_inicio::time) + ...)).
+5) Usa solo las operaciones permitidas. No generes SQL arbitrario ni DDL fuera de estas operaciones.
+6) Devuelve SOLO JSON, sin texto adicional.
+
+Contexto del usuario (guardrails):
+{guardrails or "(sin instrucciones adicionales)"}
+
+Tabla objetivo: {schema}.{table}
+Columnas:
+{cols_text}
+
+Devuelve SOLO JSON con esta forma:
+{{
+  "intent": "string corta explicando el objetivo",
+  "operations": [
+    {{"op":"cast","types":{{"hora_fin":"TIME"}}}},
+    {{"op":"fill_nulls","cols":["dia_ren"],"value":"Desconocido"}},
+    ...
+  ]
+}}
+
+Si no hay nada que hacer, devuelve {{"intent":"sin cambios","operations":[]}}.
+No añadas texto fuera del JSON.
+""".strip()
+
+def _llm_generate_plan(prompt, summary):
+    api_key = getattr(settings, "GEMINI_API_KEY", None) or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {"ok": False, "error": "Falta GEMINI_API_KEY en settings o env"}
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    # Enviamos prompt y, si hay muestra, la anexamos como JSON aparte
+    parts = [prompt]
+    if summary.get("sample"):
+        safe_sample = _jsonable(summary["sample"])
+        parts.append(json.dumps({"sample": safe_sample}, ensure_ascii=False))
+
+
+    resp = model.generate_content(parts)
+    raw = getattr(resp, "text", "") or ""
+
+    # intenta extraer JSON
+    plan = None
+    try:
+        plan = json.loads(raw)
+    except Exception:
+        # si vino con texto extra, intenta recuperar bloque JSON más grande
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start >= 0 and end > start:
+                plan = json.loads(raw[start:end+1])
+        except Exception:
+            pass
+
+    if not isinstance(plan, dict):
+        return {"ok": False, "error": "La IA no devolvió JSON válido", "raw": raw[:1000]}
+
+    # normaliza
+    plan.setdefault("intent", "")
+    ops = plan.get("operations") or []
+    if not isinstance(ops, list):
+        ops = []
+    # filtra a whitelist
+    filtered = []
+    for op in ops:
+        if not isinstance(op, dict): 
+            continue
+        if op.get("op") in ALLOWED_OPS:
+            filtered.append(op)
+    plan["operations"] = filtered
+    return {"ok": True, "plan": plan, "raw": raw[:1000]}
+
+def _apply_plan(conn, schema, table, plan: dict):
+    """
+    Traduce el plan a acciones seguras usando tus helpers/SQL.
+    Ejecuta todo dentro de la transacción abierta (conn).
+    """
+    def col_exists(cname):
+        r = conn.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema=:s AND table_name=:t AND column_name=:c
+        """), {"s": schema, "t": table, "c": cname}).fetchone()
+        return bool(r)
+
+    for op in plan.get("operations", []):
+        kind = op.get("op")
+        if kind == "rename":
+            mapping = op.get("mapping") or {}
+            # valida columnas
+            valid = {old:new for old,new in mapping.items() if col_exists(old)}
+            for old, new in valid.items():
+                conn.exec_driver_sql(
+                    f'ALTER TABLE {quoted_ident(schema)}.{quoted_ident(table)} '
+                    f'RENAME COLUMN {quoted_ident(old)} TO {quoted_ident(new)}'
+                )
+
+        elif kind == "cast":
+            types = op.get("types") or {}
+            for col, t in types.items():
+                if not col_exists(col): 
+                    continue
+                conn.exec_driver_sql(
+                    f'ALTER TABLE {quoted_ident(schema)}.{quoted_ident(table)} '
+                    f'ALTER COLUMN {quoted_ident(col)} TYPE {t} USING {quoted_ident(col)}::{t}'
+                )
+
+        elif kind == "fill_nulls":
+            cols = op.get("cols") or []
+            if not cols: 
+                continue
+            sets = ", ".join([f'{quoted_ident(c)} = COALESCE({quoted_ident(c)}, :val)' for c in cols if col_exists(c)])
+            if sets:
+                conn.execute(text(
+                    f'UPDATE {quoted_ident(schema)}.{quoted_ident(table)} SET {sets}'
+                ), {"val": op.get("value")})
+
+        elif kind == "drop_nulls":
+            cols = [c for c in (op.get("cols") or []) if col_exists(c)]
+            if cols:
+                cond = " OR ".join([f"{quoted_ident(c)} IS NULL" for c in cols])
+                conn.exec_driver_sql(
+                    f'DELETE FROM {quoted_ident(schema)}.{quoted_ident(table)} WHERE {cond}'
+                )
+
+        elif kind == "add_calculated":
+            new_col = op.get("new_col")
+            expr = op.get("expr")
+            desired_type = (op.get("type") or "").upper().strip()  # opcional
+            unit = (op.get("unit") or "seconds").lower().strip()   # solo si numeric
+
+            if not new_col or not expr:
+                continue
+
+            # Tipos actuales de columnas
+            types_map = get_column_types(conn, schema, table)  # {col_lower: data_type}
+            existing = types_map.get(new_col.lower())
+
+            # Heurística: si no especificaron type y parece intervalo, marcamos INTERVAL;
+            # si no, DOUBLE PRECISION.
+            looks_interval = bool(
+                re.search(r'\bage\s*\(', expr, re.I) or
+                re.search(r'::\s*interval\b', expr, re.I) or
+                re.search(r'\b(time|date|timestamp|hora|fecha)\b.*-.*\b(time|date|timestamp|hora|fecha)\b', expr, re.I)
+            )
+            if not desired_type:
+                desired_type = "INTERVAL" if looks_interval else "DOUBLE PRECISION"
+
+            # Si la columna no existe, créala con el tipo deseado
+            if not existing:
+                conn.exec_driver_sql(
+                    f'ALTER TABLE {qi(schema)}.{qi(table)} '
+                    f'ADD COLUMN IF NOT EXISTS {qi(new_col)} {desired_type}'
+                )
+                existing = desired_type.lower()
+
+            # Prepara la expresión final según el tipo que tenga la columna realmente
+            set_expr = expr
+
+            if existing.startswith("double") or existing in ("numeric", "real", "double precision", "decimal"):
+                # La columna es NUMÉRICA → si la expr luce intervalo, conviértela a EPOCH
+                if looks_interval and not re.search(r'EXTRACT\s*\(\s*EPOCH', expr, re.I):
+                    set_expr = f'EXTRACT(EPOCH FROM ({expr}))'
+                    if unit == "minutes":
+                        set_expr = f'({set_expr})/60.0'
+                    elif unit == "hours":
+                        set_expr = f'({set_expr})/3600.0'
+
+            elif existing.startswith("interval"):
+                # La columna es INTERVAL → usa la expr tal cual (debe devolver intervalo)
+                pass
+
+            elif existing == "text":
+                # Como texto: castea a texto el resultado
+                set_expr = f'({expr})::text'
+
+            else:
+                # Si el tipo existente no cuadra, intenta ajustarlo de forma segura.
+                # Ej.: querían INTERVAL pero es DOUBLE → convierte a EPOCH
+                if looks_interval and (existing.startswith("double") or existing in ("numeric","real","decimal")):
+                    set_expr = f'EXTRACT(EPOCH FROM ({expr}))'
+
+            # Aplica el UPDATE
+            conn.exec_driver_sql(
+                f'UPDATE {qi(schema)}.{qi(table)} SET {qi(new_col)} = {set_expr}'
+            )
+
+        elif kind == "trim":
+            cols = [c for c in (op.get("cols") or []) if col_exists(c)]
+            for c in cols:
+                conn.exec_driver_sql(
+                    f'UPDATE {quoted_ident(schema)}.{quoted_ident(table)} '
+                    f'SET {quoted_ident(c)} = TRIM({quoted_ident(c)})'
+                )
+
+        elif kind == "lower":
+            cols = [c for c in (op.get("cols") or []) if col_exists(c)]
+            for c in cols:
+                conn.exec_driver_sql(
+                    f'UPDATE {quoted_ident(schema)}.{quoted_ident(table)} '
+                    f'SET {quoted_ident(c)} = LOWER({quoted_ident(c)})'
+                )
+
+        elif kind == "upper":
+            cols = [c for c in (op.get("cols") or []) if col_exists(c)]
+            for c in cols:
+                conn.exec_driver_sql(
+                    f'UPDATE {quoted_ident(schema)}.{quoted_ident(table)} '
+                    f'SET {quoted_ident(c)} = UPPER({quoted_ident(c)})'
+                )
+
+        elif kind == "regex_replace":
+            col = op.get("col")
+            pattern = op.get("pattern")
+            repl = op.get("repl", "")
+            if col and pattern and col_exists(col):
+                conn.execute(
+                    text(
+                        f"UPDATE {qi(schema)}.{qi(table)} "
+                        f"SET {qi(col)} = regexp_replace({qi(col)}::text, :pat, :rep, 'g')"
+                    ),
+                    {"pat": pattern, "rep": repl}
+                )
+        else:
+            # ignorar no permitidos
+            continue
+ 
+
+
+@login_required
+@require_POST
+def ai_cleaning_suggest(request, schema, table):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        guardrails = payload.get("guardrails", "")
+        sample_size = int(payload.get("sample_size", 20))
+        mode = payload.get("mode", "suggest")
+
+        engine = get_engine()
+        with engine.begin() as conn:
+            summary = _schema_summary(conn, schema, table, sample_size=sample_size)
+            prompt = _ai_prompt(schema, table, summary, guardrails)
+            out = _llm_generate_plan(prompt, summary)
+            if not out.get("ok"):
+                return JsonResponse(out, status=400)
+
+            plan = out["plan"]
+            plan = _normalize_plan(plan)
+
+            if mode == "apply":
+                _apply_plan(conn, schema, table, plan)
+                return JsonResponse(_jsonable({"ok": True, "applied": True, "intent": plan.get("intent","")}))
+
+            return JsonResponse(_jsonable({"ok": True, "plan": plan, "intent": plan.get("intent","")}))
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+@login_required
+@require_POST
+def ai_cleaning_apply(request, schema, table):
+    try:
+        payload = json.loads(request.body.decode("utf-8"))
+        plan = payload.get("plan")
+        if not isinstance(plan, dict):
+            return JsonResponse({"ok": False, "error": "plan inválido"}, status=400)
+
+        # valida whitelist antes de aplicar
+        ops = plan.get("operations") or []
+        for op in ops:
+            if not isinstance(op, dict) or op.get("op") not in ALLOWED_OPS:
+                return JsonResponse({"ok": False, "error": f"Operación no permitida: {op}"}, status=400)
+
+        engine = get_engine()
+        with engine.begin() as conn:
+            _apply_plan(conn, schema, table, plan)
+
+        return JsonResponse({"ok": True, "applied": True})
+    except Exception as e:
+        return JsonResponse({"ok": False, "error": str(e)}, status=400)
+
+def _normalize_plan(plan):
+    ops = plan.get("operations") or []
+    for op in ops:
+        if not isinstance(op, dict): 
+            continue
+        if op.get("op") == "add_calculated":
+            t = (op.get("type") or "").upper()
+            expr = op.get("expr", "")
+            unit = (op.get("unit") or "seconds").lower()
+            # si el type es numérico y la expr parece intervalo, convierte a epoch
+            if t in ("DOUBLE PRECISION","NUMERIC","REAL","DECIMAL"):
+                if re.search(r'\b-\b', expr) and not re.search(r'EXTRACT\s*\(\s*EPOCH', expr, re.I):
+                    base = f"EXTRACT(EPOCH FROM ({expr}))"
+                    if unit == "minutes":
+                        op["expr"] = f"({base})/60.0"
+                    elif unit == "hours":
+                        op["expr"] = f"({base})/3600.0"
+                    else:
+                        op["expr"] = base
+    return plan
