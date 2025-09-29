@@ -1240,6 +1240,288 @@ def guardar_diagrama(diagrama):
     except Exception as e:
         print(f"Error guardando diagrama: {e}")
         return None
+    
+def generar_chat_chart_o_prediccion(data_source, mensaje_usuario):
+    """
+    Decide: (a) generar gráfico (SQL + Chart.js) o (b) entrenar+predecir (ML) y devolver charts de ML.
+    Retorna una tupla discriminada:
+      - ("chart", diagrama_obj, None, None)
+      - ("ml",    ml_payload,    None, None)
+      - ("ask",   None,          None, ask_msg)
+      - ("error", None,          error_msg, None)
+    """
+    from .models import Diagrama
+    import re, json
+    import google.generativeai as genai
+
+    if not data_source.internal_schema:
+        return None, "El archivo no tiene datos válidos", None, None
+
+    schema = data_source.internal_schema
+    tabla_default = data_source.internal_table
+
+    try:
+        # 1) Esquema
+        esquema_info = get_schema_info(schema)  # {tabla: {columns:[...], ...}}
+        if not esquema_info:
+            return None, "No se pudo analizar la estructura del esquema", None, None
+
+        esquema_reducido = reduce_schema({
+            t: info.get("columns", [])
+            for t, info in esquema_info.items()
+        })
+
+        # 2) Saludo / ejemplos
+        if not mensaje_usuario or mensaje_usuario.strip().lower() in {"hola", "buenas", "hello", "hey"}:
+            ejemplos = []
+            for t, cols in esquema_reducido.items():
+                if len(cols) >= 2:
+                    ejemplos.append(f"Total de {cols[1]} por {cols[0]} en {t}")
+                elif len(cols) == 1:
+                    ejemplos.append(f"Conteo de {cols[0]} en {t}")
+                if len(ejemplos) >= 2:
+                    break
+            ejemplos_texto = " o ".join([f"'{e}'" for e in ejemplos]) if ejemplos else "'Conteo por categoría en alguna tabla'"
+            return None, None, f"¡Hola! Dime qué quieres ver. Por ejemplo: {ejemplos_texto}.", None
+
+        # 3) Prompt unificado (chart o predicción)
+        prompt = f"""
+Eres un asistente que, según la instrucción, decide entre:
+A) Generar SQL para PostgreSQL y sugerir tipo de gráfico.
+B) Preparar una predicción de Machine Learning (entrenar y predecir sobre una tabla).
+
+ESQUEMA (resumido: {{tabla: [columnas...]}}):
+{json.dumps(esquema_reducido, ensure_ascii=False)}
+
+INSTRUCCIÓN DEL USUARIO:
+\"\"\"{mensaje_usuario}\"\"\"
+
+
+REGLAS:
+- No inventes tablas ni columnas. Usa únicamente las tablas listadas arriba.
+- Si haces JOIN, debe ser solo entre tablas del ESQUEMA anterior.
+- Si PREFER_MODE = "ml_predict" y el pedido es compatible con predicción, DEVUELVE "ml_predict".
+- Si el usuario pide "predecir", "pronóstico", "clasificar", "probabilidad", "modelo", "forecast", "predicción" → usa "ml_predict".
+- Si no está claro el objetivo (target) o la tabla, responde con "ask".
+- En "ml_predict" devuelve: target, task (auto|classification|regression), features opcional, time_col opcional, test_size [5..50],
+  algo {{"auto","rf","hgb","ridge","logreg"}}, write_back true/false y pred_col opcional.
+- En "chart" NO califiques con esquema; solo devuelve la consulta con los nombres de tabla tal como aparecen en el esquema.
+  (El backend validará y calificará FROM/JOIN).
+- Si el usuario pide "predecir", "pronosticar", "forecast", "probabilidad de", "estimación futura", etc., usa MODO ML.
+- Si es análisis de datos existentes (agregados, conteos, series históricas sin extrapolar), usa MODO SQL.
+- En SQL:
+  - Puedes usar una o más tablas con JOIN.
+  - FROM debe estar cualificado: FROM "{schema}"."NOMBRE_TABLA".
+  - Usa comillas dobles para identificadores.
+  - Si falta info, responde con "ask" (no inventes).
+- En ML:
+  - Indica tabla y target obligatorios.
+  - task puede ser "classification", "regression" o "auto".
+  - time_col opcional: si existe, dividir por tiempo (validación temporal).
+  - test_size en % (por defecto 20).
+  - algo en {"rf","hgb","logreg","ridge","auto"} (si no procede, usa "auto").
+  - features opcional; si no se dan, usar todas menos el target.
+  - write_back_col opcional para guardar predicciones (si no, dejar null).
+  - Si falta info clave (tabla o target), responde con "ask".
+
+Devuelve SOLO JSON válido en UNO de estos formatos:
+
+1) SQL/Chart:
+{{
+  "mode": "sql_chart",
+  "tabla": "nombre_tabla",
+  "sql": "SELECT ...",
+  "grafico": "bar|line|pie|doughnut|scatter",
+  "titulo": "Título",
+  "respuesta": "Descripción breve"
+}}
+
+2) ML Predicción:
+{{
+  "mode": "ml_predict",
+  "tabla": "nombre_tabla",
+  "target": "columna_objetivo",
+  "task": "classification|regression|auto",
+  "time_col": "columna_tiempo|null",
+  "test_size": 20,
+  "algo": "rf|hgb|logreg|ridge|auto",
+  "features": ["col1","col2"] ,
+  "write_back_col": "pred_target|null",
+  "nota": "Breve explicación para el usuario"
+}}
+
+3) Falta info:
+{{ "ask": "Pregunta concreta (tabla/target/métrica/dimensión/periodo)"}}
+"""
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        resp = model.generate_content(prompt)
+        raw_text = getattr(resp, "text", str(resp))
+        print("===== RESPUESTA CRUDA GEMINI (router) =====")
+        print(raw_text)
+        print("===========================================")
+
+        json_block = _extract_json_block(raw_text)
+        if not json_block:
+            # fallback a pregunta genérica
+            return None, None, "¿Quieres un gráfico con SQL de datos existentes o una predicción ML? Si es ML, dime tabla y columna objetivo (target).", None
+
+        try:
+            data = json.loads(json_block)
+        except Exception:
+            return None, None, "La respuesta no fue clara. ¿Gráfico (SQL) o Predicción (ML)?", None
+
+        # 4) Ask
+        if "ask" in data and not data.get("mode"):
+            return None, None, (data.get("ask") or "¿En qué tabla trabajamos y qué necesitas (gráfico o predicción)?"), None
+
+        mode = (data.get("mode") or "").strip().lower()
+        if mode not in {"sql_chart", "ml_predict"}:
+            # Si el modelo no decidió, asumimos flujo clásico SQL.
+            mode = "sql_chart"
+
+        # =============== MODO SQL/CHART ===============
+        if mode == "sql_chart":
+            tabla_elegida = (data.get("tabla") or "").strip()
+            if not tabla_elegida:
+                if not data.get("sql"):
+                    return None, None, "¿En qué tabla del esquema debo buscar?", None
+                tabla_elegida = tabla_default
+
+            if tabla_elegida not in esquema_info:
+                return None, None, f'No encuentro la tabla "{tabla_elegida}". ¿Cuál de estas quieres usar? {", ".join(sorted(esquema_info.keys())[:10])}', None
+
+            sql = data.get("sql")
+            chart_type = (data.get("grafico") or "bar").lower()
+            titulo = data.get("titulo")
+            respuesta = data.get("respuesta") or "Aquí tienes el análisis."
+
+            if not sql:
+                return None, None, "Necesito tabla, métrica, dimensión y periodo.", None
+
+            # Cualificar FROM con esquema
+            esquema_y_tabla = f'"{schema}"."{tabla_elegida}"'
+            if esquema_y_tabla not in sql:
+                sql = re.sub(
+                    r'FROM\s+("[^"]+"\.)?"?'+re.escape(tabla_elegida)+r'"?\b',
+                    f'FROM {esquema_y_tabla}',
+                    sql,
+                    flags=re.IGNORECASE
+                )
+                if esquema_y_tabla not in sql:
+                    sql = re.sub(
+                        r'FROM\s+"?([a-zA-Z_]\w*)"?\b',
+                        lambda m: f'FROM "{schema}"."{m.group(1)}"' if m.group(1) in esquema_info else m.group(0),
+                        sql,
+                        flags=re.IGNORECASE
+                    )
+
+            chart_data = ejecutar_sql_para_chart(sql)
+            if not chart_data or not chart_data.get("labels"):
+                return None, "La consulta no devolvió datos válidos para graficar", None, None
+
+            diagrama = Diagrama(
+                data_source=data_source,
+                owner=data_source.owner,
+                title=titulo,
+                description=respuesta,
+                chart_type=chart_type,
+                source_type=Diagrama.CHAT,
+                sql_query=sql,
+                chart_data=chart_data,
+                order=getattr(data_source, 'diagramas_count', 0) or 0
+            )
+            return diagrama, None, None, None
+        from ml.services import train_model, predict_model
+        # =============== MODO ML/PREDICT ===============
+        # Validar mínimo: tabla + target
+        tabla_ml = (data.get("tabla") or "").strip()
+        target = (data.get("target") or "").strip()
+        if not tabla_ml or not target:
+            return None, None, "Para predicción necesito la tabla y la columna objetivo (target).", None
+
+        if tabla_ml not in esquema_reducido:
+            return None, None, f'No encuentro la tabla "{tabla_ml}" en el esquema. Tablas: {", ".join(sorted(esquema_reducido.keys())[:10])}', None
+
+        cols = set(esquema_reducido[tabla_ml] or [])
+        if target not in cols:
+            return None, None, f'La columna objetivo "{target}" no existe en "{tabla_ml}". Columnas: {", ".join(list(cols)[:15])}...', None
+
+        # Parametrización opcional
+        task = (data.get("task") or "auto").lower()
+        if task not in {"classification","regression","auto"}:
+            task = "auto"
+        time_col = data.get("time_col")
+        if time_col and time_col not in cols:
+            # si la columna de tiempo no existe, la ignoramos y seguimos
+            time_col = None
+        try:
+            test_size = int(data.get("test_size") or 20)
+        except:
+            test_size = 20
+        algo = (data.get("algo") or "auto").lower()
+        if algo not in {"rf","hgb","logreg","ridge","auto"}:
+            algo = "auto"
+        features = data.get("features") or []
+        if isinstance(features, list):
+            features = [c for c in features if c in cols and c != target]
+        else:
+            features = []
+
+        write_back_col = data.get("write_back_col")
+        if write_back_col:
+            # normalizamos el nombre
+            write_back_col = str(write_back_col).strip().strip('"')
+            if not write_back_col:
+                write_back_col = None
+
+        # Entrenar
+        try:
+            tr_out = train_model(
+                schema, tabla_ml,
+                target=target,
+                task=(None if task=="auto" else task),
+                time_col=time_col,
+                test_size=test_size,
+                algo=(None if algo=="auto" else algo),
+                features=features
+            )
+        except Exception as e:
+            return None, f"Error al entrenar el modelo: {e}", None, None
+
+        model_id = tr_out.get("model_id")
+        metrics = tr_out.get("metrics", {})
+        used_features = tr_out.get("used_features", [])
+
+        # Predecir (y opcionalmente escribir columna)
+        try:
+            pr_out = predict_model(
+                schema, tabla_ml,
+                model_id=model_id,
+                write_back_col=write_back_col
+            )
+        except Exception as e:
+            return None, f"Error al predecir con el modelo: {e}", None, None
+
+        ml_payload = {
+            "model_id": model_id,
+            "table": tabla_ml,
+            "target": target,
+            "metrics": metrics,
+            "used_features": used_features,
+            "write_back_col": pr_out.get("write_back_col"),
+            "n": pr_out.get("n"),
+            "charts": pr_out.get("charts") or [],
+            # opcionalmente el texto breve del asistente
+            "note": data.get("nota") or "Modelo entrenado y aplicado sobre la tabla."
+        }
+        return None, None, None, ml_payload
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return None, f"Error generando respuesta: {str(e)}", None, None
+
 
 def ejecutar_sql_para_chart(sql_query):
     """

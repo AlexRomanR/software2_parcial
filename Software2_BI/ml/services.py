@@ -242,45 +242,127 @@ def get_columns(schema, table):
         """), {"s": schema, "t": table}).fetchall()
     return [{"name": r[0], "type": r[1]} for r in rows]
 
+def _split(df: pd.DataFrame, target: str, time_col: str | None, test_pct: int):
+    df = df.copy()
+
+    # 1) quitar filas sin target
+    if target in df.columns:
+        df = df[~pd.isna(df[target])]
+
+    n = len(df)
+    if n == 0:
+        # sin datos, devolvemos vacíos (el caller dará un error claro)
+        return df, df.iloc[0:0]
+
+    # 2) split temporal si es viable (>=2 filas válidas de tiempo)
+    if time_col and time_col in df.columns:
+        tmp = df.copy()
+        tmp[time_col] = pd.to_datetime(tmp[time_col], errors="coerce")
+        tmp = tmp.dropna(subset=[time_col])
+        if len(tmp) >= 2:
+            tmp = tmp.sort_values(time_col)
+            k = int(len(tmp) * (100 - int(test_pct)) / 100)
+            # asegurar al menos 1 en train y 1 en test
+            k = max(1, min(k, len(tmp) - 1))
+            tr = tmp.iloc[:k]
+            te = tmp.iloc[k:]
+            return tr, te
+        # si no hay suficientes timestamps válidos, caemos a split aleatorio
+
+    # 3) split aleatorio robusto
+    if len(df) == 1:
+        # 1 muestra: todo train, test vacío
+        return df, df.iloc[0:0]
+
+    X = df.drop(columns=[target])
+    y = df[target]
+    # garantizar que test tenga al menos 1 fila
+    test_size = max(1, int(round(len(df) * (int(test_pct) / 100.0))))
+    test_size = min(test_size, len(df) - 1)  # deja al menos 1 en train
+
+    Xtr, Xte, ytr, yte = train_test_split(
+        X, y,
+        test_size=test_size,
+        random_state=42,
+        shuffle=True,
+        stratify=(y if y.nunique() > 1 and len(y) >= 10 else None)
+    )
+    return pd.concat([Xtr, ytr], axis=1), pd.concat([Xte, yte], axis=1)
+
 def train_model(schema, table, *, target, task, time_col, test_size, algo, features):
     engine = get_engine()
     with engine.begin() as conn:
         df = pd.read_sql(text(f'SELECT * FROM {qi(schema)}.{qi(table)}'), conn)
 
-    if target not in df.columns: raise ValueError(f"Target '{target}' no existe")
-    X = df.drop(columns=[target]).copy()
+    if target not in df.columns:
+        raise ValueError(f"Target '{target}' no existe")
+
+    # seleccionar features
     if features:
-        used = [c for c in features if c in df.columns]
+        used = [c for c in features if c in df.columns and c != target]
     else:
         used = [c for c in df.columns if c != target]
+
+    if not used:
+        raise ValueError("No hay features para entrenar (lista vacía tras validar columnas).")
+
     X = df[used].copy()
+
     # intento suave de parseo fechas
     for c in X.columns:
         if X[c].dtype == object:
-            try: X[c] = pd.to_datetime(X[c], errors='ignore')
-            except: pass
-    df_all = pd.concat([X, df[target]], axis=1)
-    tr, te = _split(df_all, target, time_col, int(test_size))
-    Xtr, ytr = tr.drop(columns=[target]), tr[target]
-    Xte, yte = te.drop(columns=[target]), te[target]
+            try:
+                X[c] = pd.to_datetime(X[c], errors='ignore')
+            except:
+                pass
 
+    df_all = pd.concat([X, df[target]], axis=1)
+
+    # === SPLIT ROBUSTO ===
+    tr, te = _split(df_all, target, time_col, int(test_size))
+
+    if len(tr) == 0:
+        raise ValueError("No hay filas suficientes para entrenar (posible time_col sin fechas válidas o target todo nulo).")
+
+    Xtr, ytr = tr.drop(columns=[target]), tr[target]
+    Xte, yte = (te.drop(columns=[target]), te[target]) if len(te) else (te, te)
+
+    # inferir tarea
     task_final = _infer_task(ytr, task)
+
+    # checar clases si es clasificación
+    if task_final == "classification" and pd.Series(ytr).nunique() < 2:
+        raise ValueError("El target tiene una sola clase en el conjunto de entrenamiento; no se puede entrenar un clasificador.")
+
     pipe = _build_pipeline(Xtr, task_final, algo)
     pipe.fit(Xtr, ytr)
 
-    if task_final == "classification":
-        ypred = pipe.predict(Xte)
-        try: proba = pipe.predict_proba(Xte)
-        except: proba = None
-        metrics = _metrics(task_final, yte, ypred, proba)
+    # métricas: solo si hay test
+    if len(Xte) > 0:
+        if task_final == "classification":
+            ypred = pipe.predict(Xte)
+            try:
+                proba = pipe.predict_proba(Xte)
+            except:
+                proba = None
+            metrics = _metrics(task_final, yte, ypred, proba)
+        else:
+            ypred = pipe.predict(Xte)
+            metrics = _metrics(task_final, yte, ypred)
     else:
-        ypred = pipe.predict(Xte)
-        metrics = _metrics(task_final, yte, ypred)
+        metrics = {"note": "Sin conjunto de prueba (muy pocos datos o time_col inválida)."}
 
     mid  = f"{schema}__{table}__{target}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     path = os.path.join(_store_dir(), f"{mid}.joblib")
-    joblib.dump({"pipeline": pipe, "task": task_final, "target": target, "features": list(Xtr.columns), "time_col": time_col}, path)
+    joblib.dump({
+        "pipeline": pipe,
+        "task": task_final,
+        "target": target,
+        "features": list(Xtr.columns),
+        "time_col": time_col
+    }, path)
     return {"model_id": mid, "metrics": metrics, "used_features": used}
+
 
 def predict_model(schema, table, *, model_id, write_back_col=None):
     path = os.path.join(_store_dir(), f"{model_id}.joblib")
