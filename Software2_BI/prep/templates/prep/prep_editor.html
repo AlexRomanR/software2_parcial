@@ -35,6 +35,13 @@
 
   <div class="mb-2 d-flex gap-2">
     <button class="btn btn-outline-secondary btn-sm" onclick="reloadPage()">Recargar</button>
+    <button id="btn-ai-clean" class="btn btn-warning">
+      🪄 Limpieza con IA
+    </button>
+    <a class="btn btn-primary btn-sm"
+      href="{% url 'ml:panel' schema=schema table=table %}">
+      🤖 ML · Predicción
+    </a>
     <button class="btn btn-outline-success btn-sm" onclick="addRow()">Agregar fila</button>
     <button class="btn btn-outline-danger btn-sm" onclick="deleteSelected()">Eliminar filas</button>
     <button class="btn btn-success btn-sm" onclick="saveChanges()">Guardar cambios</button>
@@ -52,8 +59,57 @@
   </div>
 
   <pre id="preview" class="mt-3" style="white-space:pre-wrap;"></pre>
+  
 </div>
+<div class="modal fade" id="aiCleanModal" tabindex="-1" aria-labelledby="aiCleanLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form id="ai-clean-form">
+        <div class="modal-header">
+          <h5 class="modal-title" id="aiCleanLabel">Limpieza con IA</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label">Contexto / Guardrails (opcional)</label>
+            <textarea class="form-control" name="guardrails" rows="4" placeholder="Ej: No borres columnas; no cambies tipos de fecha; normaliza 'hora_fin' a HH:MM:SS; rellena nulos de 'dia_ren' con 'Desconocido'"></textarea>
+          </div>
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label">Tamaño de muestra (filas)</label>
+              <input type="number" class="form-control" name="sample_size" value="20" min="0" />
+              <div class="form-text">0 = no enviar muestra</div>
+            </div>
+            <div class="col-6">
+              <label class="form-label">Modo</label>
+              <select class="form-select" name="mode">
+                <option value="suggest" selected>Solo sugerir plan</option>
+                <option value="apply">Aplicar directamente</option>
+              </select>
+            </div>
+          </div>
 
+          <hr>
+          <div id="ai-plan-preview" class="d-none">
+            <label class="form-label">Plan sugerido</label>
+            <pre class="bg-light p-2 rounded" style="max-height: 300px; overflow:auto;"></pre>
+            <div class="small text-muted">Revisa antes de aplicar.</div>
+          </div>
+
+          <div id="ai-error" class="alert alert-danger d-none mt-2"></div>
+          <div id="ai-info" class="alert alert-info d-none mt-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+          <button type="submit" class="btn btn-primary">Enviar a IA</button>
+          <button type="button" id="btn-apply-plan" class="btn btn-success d-none">Aplicar plan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
 <script>
 (() => {
   const schema = "{{ schema }}";
@@ -65,9 +121,18 @@
   let columnDefs = [];
   let changes = new Map();
   let gridApi;
-
+  const modalEl = document.getElementById('aiCleanModal');
+  const modal = new bootstrap.Modal(modalEl);
+  const btnOpen = document.getElementById('btn-ai-clean');
+  const form = document.getElementById('ai-clean-form');
+  const pre = document.querySelector('#ai-plan-preview pre');
+  const previewBox = document.getElementById('ai-plan-preview');
+  const errBox = document.getElementById('ai-error');
+  const infoBox = document.getElementById('ai-info');
+  const btnApply = document.getElementById('btn-apply-plan');
+  let lastPlan = null;
   const csrftoken = (document.cookie.match('(^|;)\\s*csrftoken\\s*=\\s*([^;]+)')||[]).pop() || '';
-
+  
   // === Header component (Community) ===
   function MyHeader(){}
 MyHeader.prototype.init = function(params){
@@ -378,6 +443,93 @@ MyHeader.prototype.refresh = function(p){ this.eGui.querySelector('.my-header-la
     initGrid();
     loadPage();
   });
+  function getCsrfToken() {
+    const m = document.cookie.match(/csrftoken=([^;]+)/);
+    return m ? m[1] : '';
+  }
+
+  btnOpen.addEventListener('click', () => {
+    form.reset();
+    previewBox.classList.add('d-none');
+    btnApply.classList.add('d-none');
+    errBox.classList.add('d-none');
+    infoBox.classList.add('d-none');
+    lastPlan = null;
+    modal.show();
+  });
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errBox.classList.add('d-none');
+    infoBox.classList.remove('d-none');
+    infoBox.textContent = 'Consultando a la IA...';
+
+    const data = new FormData(form);
+    const payload = {
+      guardrails: data.get('guardrails') || "",
+      sample_size: parseInt(data.get('sample_size') || "20", 10),
+      mode: data.get('mode') || "suggest"
+    };
+
+    try {
+      const res = await fetch(`/prep/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/ai/suggest`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken': getCsrfToken()},
+        body: JSON.stringify(payload)
+      });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || 'Error IA');
+
+      infoBox.classList.add('d-none');
+
+      if (payload.mode === 'apply') {
+        // ya aplicado en el backend
+        previewBox.classList.add('d-none');
+        btnApply.classList.add('d-none');
+        // recarga datos de la grilla si tienes función
+        if (window.reloadGrid) window.reloadGrid();
+        infoBox.classList.remove('d-none');
+        infoBox.textContent = 'Cambios aplicados por IA.';
+        return;
+      }
+
+      // modo suggest → mostrar plan
+      lastPlan = j.plan;
+      pre.textContent = JSON.stringify(j.plan, null, 2);
+      previewBox.classList.remove('d-none');
+      btnApply.classList.remove('d-none');
+    } catch (err) {
+      infoBox.classList.add('d-none');
+      errBox.classList.remove('d-none');
+      errBox.textContent = err.message || String(err);
+    }
+  });
+
+  btnApply.addEventListener('click', async () => {
+    if (!lastPlan) return;
+    errBox.classList.add('d-none');
+    infoBox.classList.remove('d-none');
+    infoBox.textContent = 'Aplicando plan...';
+
+    try {
+      const res = await fetch(`/prep/${encodeURIComponent(schema)}/${encodeURIComponent(table)}/ai/apply`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken': getCsrfToken()},
+        body: JSON.stringify({ plan: lastPlan })
+      });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || 'Error al aplicar plan');
+      infoBox.classList.add('d-none');
+      // recarga la grilla
+      if (window.reloadGrid) window.reloadGrid();
+      modal.hide();
+    } catch (err) {
+      infoBox.classList.add('d-none');
+      errBox.classList.remove('d-none');
+      errBox.textContent = err.message || String(err);
+    }
+  });
 })();
 </script>
+
 {% endblock %}

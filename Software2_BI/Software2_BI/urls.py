@@ -30,6 +30,7 @@ urlpatterns = [
     path("prep/", include(("prep.urls", "prep"), namespace="prep")),
     path('notifications/', include('notifications.urls', namespace='notifications')),
     path('api/', include('Software2_BI.api_urls')),
+    path("ml/", include(("ml.urls", "ml"), namespace="ml")),
 ]
 if settings.DEBUG:
     urlpatterns += staticfiles_urlpatterns()

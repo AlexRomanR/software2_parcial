@@ -51,7 +51,8 @@ INSTALLED_APPS = [
     "ingestion",      
     "prep",
     "core",
-    "notifications"
+    "notifications",
+    "ml",
 ]
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"

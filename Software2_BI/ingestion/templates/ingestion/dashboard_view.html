@@ -357,6 +357,32 @@
           <button class="btn-small btn-delete" onclick="cerrarPreview()">❌ Descartar</button>
         </div>
       </div>
+      <!-- PREVIEW DE PREDICCIÓN (ML) -->
+      <div id="ml-preview" class="preview-section" style="display:none;">
+        <h4>🤖 Predicción (Preview)</h4>
+
+        <div style="margin: 10px 0;">
+          <strong>Modelo:</strong> <span id="ml-model-id"></span><br>
+          <strong>Target:</strong> <span id="ml-target"></span><br>
+          <strong>Filas procesadas:</strong> <span id="ml-n-rows"></span><br>
+          <strong>Columna escrita:</strong> <span id="ml-writeback"></span>
+        </div>
+
+        <div>
+          <strong>Métricas:</strong>
+          <pre id="ml-metrics" style="background:#fff;padding:10px;border-radius:6px;border:1px solid #ddd;max-height:220px;overflow:auto;"></pre>
+        </div>
+
+        <div style="margin-top:10px;">
+          <strong>Gráficos:</strong>
+          <div id="ml-charts" style="display:grid;grid-template-columns:1fr;gap:12px;max-height:520px;overflow:auto;"></div>
+        </div>
+
+        <div style="text-align:center;margin-top:10px;">
+          <button class="btn-small btn-delete" onclick="cerrarMLPreview()">❌ Cerrar</button>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -381,6 +407,14 @@
   const sendBtn = document.getElementById("send-btn");
   const previewSection = document.getElementById("preview-section");
   const saveDiagramBtn = document.getElementById("save-diagram-btn");
+  const mlPreview   = document.getElementById('ml-preview');
+  const mlModelId   = document.getElementById('ml-model-id');
+  const mlTarget    = document.getElementById('ml-target');
+  const mlNRows     = document.getElementById('ml-n-rows');
+  const mlWriteBack = document.getElementById('ml-writeback');
+  const mlMetricsEl = document.getElementById('ml-metrics');
+  const mlChartsBox = document.getElementById('ml-charts');
+let mlChartInstances = [];
   
   let previewChart = null;
   let currentPreviewData = null;
@@ -464,17 +498,40 @@
     .then(data => {
       if (data.error) {
         addMessage("err", data.error);
-      } else if (data.success) {
-        if (data.ask) {
-          addMessage("bot", data.ask);
-          return;
-        }
-        if (data.diagrama) {
-          addMessage("bot", data.diagrama.description);
-          mostrarPreview(data.diagrama);
-        } else {
-          addMessage("err", "No recibí datos de diagrama.");
-        }
+        return;
+      }
+      if (!data.success) {
+        addMessage("err", "La operación no fue exitosa.");
+        return;
+      }
+
+      if (data.ask) {
+        addMessage("bot", data.ask);
+        return;
+      }
+
+      // 👇 NUEVO: soporte para predicción
+      if (data.mode === 'ml_predict' && data.ml) {
+        const msg =
+          `Modelo entrenado (${data.ml.model_id || 'id no disponible'}). ` +
+          (data.ml.write_back_col ? `Se escribió la columna "${data.ml.write_back_col}". ` : '') +
+          `Se generaron ${(data.ml.charts || []).length} gráfico(s).`;
+        addMessage("bot", msg);
+
+        // cierra preview de gráfico si estaba abierto
+        cerrarPreview && cerrarPreview();
+        // muestra preview ML
+        showMLPreview(data.ml);
+        return;
+      }
+
+      // Modo gráfico (lo de siempre)
+      if (data.diagrama) {
+        addMessage("bot", data.diagrama.description);
+        cerrarMLPreview(); // cierra preview ML si estaba abierto
+        mostrarPreview(data.diagrama);
+      } else {
+        addMessage("err", "No recibí contenido para mostrar.");
       }
     })
     .catch(err => addMessage("err", String(err)));
@@ -662,6 +719,58 @@ function confirmarEnvioEmail() {
     }
   })
   .catch(err => alert("❌ Error al capturar el gráfico: " + err.message));
+}
+
+function showMLPreview(ml) {
+  mlModelId.textContent   = ml.model_id || '(sin id)';
+  mlTarget.textContent    = ml.target || '(desconocido)';
+  mlNRows.textContent     = (ml.n_rows ?? '—');
+  mlWriteBack.textContent = ml.write_back_col || '—';
+
+  try { mlMetricsEl.textContent = JSON.stringify(ml.metrics || {}, null, 2); }
+  catch { mlMetricsEl.textContent = String(ml.metrics || ''); }
+
+  // limpiar charts previos
+  mlChartInstances.forEach(ch => { try { ch.destroy(); } catch{} });
+  mlChartInstances = [];
+  mlChartsBox.innerHTML = '';
+
+  (ml.charts || []).forEach((c, idx) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'chart-container';
+    wrap.style.height = '260px';
+
+    const canvas = document.createElement('canvas');
+    canvas.id = `ml-chart-${Date.now()}-${idx}`;
+    canvas.className = 'chart-canvas';
+    wrap.appendChild(canvas);
+    mlChartsBox.appendChild(wrap);
+
+    const ctx = canvas.getContext('2d');
+    const chart = new Chart(ctx, {
+      type: (c.chart_type || 'bar'),
+      data: c.data || { labels: [], datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          title: { display: !!c.title, text: c.title || '', font: { size: 14 } },
+          legend: { display: true }
+        },
+        scales: { x: { ticks: { autoSkip: true, maxRotation: 0 } } }
+      }
+    });
+    mlChartInstances.push(chart);
+  });
+
+  mlPreview.style.display = 'block';
+}
+
+function cerrarMLPreview() {
+  mlPreview.style.display = 'none';
+  mlChartInstances.forEach(ch => { try { ch.destroy(); } catch{} });
+  mlChartInstances = [];
+  mlChartsBox.innerHTML = '';
 }
 
 

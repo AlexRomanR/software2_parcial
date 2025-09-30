@@ -6,7 +6,7 @@ from .models import DataSource, UploadedDataset, Diagrama
 from .services import (
     import_csv_or_excel, import_sql_script, sanitize_identifier, get_dataset, 
     get_schema_info, generar_consulta_y_grafico, generar_diagramas_automaticos,
-    generar_diagrama_chat, guardar_diagrama, obtener_diagramas_por_archivo
+    generar_diagrama_chat, guardar_diagrama, obtener_diagramas_por_archivo, generar_chat_chart_o_prediccion
 )
 import json
 import uuid
@@ -385,41 +385,53 @@ def chat_integrado_view(request):
     """
     if request.method != "POST":
         return JsonResponse({"error": "Método no permitido"}, status=405)
-    
+
     try:
         data = json.loads(request.body)
         source_id = data.get('source_id')
         mensaje = data.get('mensaje', '').strip()
-        
+
         if not source_id or not mensaje:
             return JsonResponse({"error": "Source ID y mensaje requeridos"}, status=400)
-        
+
         source = get_object_or_404(DataSource, id=source_id, owner=request.user)
-        
-        # Generar diagrama usando el chat
-        diagrama, error, ask = generar_diagrama_chat(source, mensaje)
-        
+
+        # NUEVO: router que decide SQL vs ML
+        diagrama, error, ask, ml_payload = generar_chat_chart_o_prediccion(source, mensaje)
+
         if error:
             return JsonResponse({"error": error}, status=200)
-        
+
         if ask:
             return JsonResponse({"success": True, "ask": ask}, status=200)
 
-        
-        # Retornar datos del diagrama para preview
-        return JsonResponse({
-            "success": True,
-            "diagrama": {
-                "title": diagrama.title,
-                "description": diagrama.description,
-                "chart_type": diagrama.chart_type,
-                "chart_data": diagrama.chart_data,
-                "sql_query": diagrama.sql_query
-            }
-        }, status=200)
-        
+        # Si hubo ML
+        if ml_payload:
+            return JsonResponse({
+                "success": True,
+                "mode": "ml_predict",
+                "ml": ml_payload
+            }, status=200)
+
+        # Si no, es diagrama clásico
+        if diagrama:
+            return JsonResponse({
+                "success": True,
+                "diagrama": {
+                    "title": diagrama.title,
+                    "description": diagrama.description,
+                    "chart_type": diagrama.chart_type,
+                    "chart_data": diagrama.chart_data,
+                    "sql_query": diagrama.sql_query
+                }
+            }, status=200)
+
+        # Nada que mostrar
+        return JsonResponse({"error": "No recibí contenido para mostrar."}, status=200)
+
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @csrf_exempt
 @login_required
