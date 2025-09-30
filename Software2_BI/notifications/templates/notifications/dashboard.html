@@ -1,9 +1,5 @@
-{% extends "base.html" %}
-{% load static %}
-
-{% block title %}Sistema de Alertas{% endblock %}
-
-{% block content %}
+{% extends "base.html" %} {% load static %} {% block title %}Sistema de
+Alertas{% endblock %} {% block content %}
 <div class="container-fluid py-2">
   <!-- Resumen de alertas -->
   <div class="row">
@@ -15,8 +11,12 @@
               <p class="text-sm mb-0 text-capitalize">Total Alertas</p>
               <h4 class="mb-0">{{ alert_summary.total }}</h4>
             </div>
-            <div class="icon icon-md icon-shape bg-gradient-info shadow-info text-center border-radius-lg">
-              <i class="material-symbols-rounded opacity-10">notification_important</i>
+            <div
+              class="icon icon-md icon-shape bg-gradient-info shadow-info text-center border-radius-lg"
+            >
+              <i class="material-symbols-rounded opacity-10"
+                >notification_important</i
+              >
             </div>
           </div>
         </div>
@@ -30,7 +30,9 @@
               <p class="text-sm mb-0 text-capitalize">Nuevas</p>
               <h4 class="mb-0">{{ alert_summary.new }}</h4>
             </div>
-            <div class="icon icon-md icon-shape bg-gradient-warning shadow-warning text-center border-radius-lg">
+            <div
+              class="icon icon-md icon-shape bg-gradient-warning shadow-warning text-center border-radius-lg"
+            >
               <i class="material-symbols-rounded opacity-10">new_releases</i>
             </div>
           </div>
@@ -45,7 +47,9 @@
               <p class="text-sm mb-0 text-capitalize">Críticas</p>
               <h4 class="mb-0">{{ alert_summary.critical }}</h4>
             </div>
-            <div class="icon icon-md icon-shape bg-gradient-danger shadow-danger text-center border-radius-lg">
+            <div
+              class="icon icon-md icon-shape bg-gradient-danger shadow-danger text-center border-radius-lg"
+            >
               <i class="material-symbols-rounded opacity-10">error</i>
             </div>
           </div>
@@ -60,7 +64,9 @@
               <p class="text-sm mb-0 text-capitalize">KPIs Activos</p>
               <h4 class="mb-0">{{ user_kpis.count }}</h4>
             </div>
-            <div class="icon icon-md icon-shape bg-gradient-success shadow-success text-center border-radius-lg">
+            <div
+              class="icon icon-md icon-shape bg-gradient-success shadow-success text-center border-radius-lg"
+            >
               <i class="material-symbols-rounded opacity-10">trending_up</i>
             </div>
           </div>
@@ -79,24 +85,43 @@
         <div class="card-body">
           <div class="row">
             <div class="col-md-6 col-xl-3">
-              <a href="{% url 'notifications:create_kpi' %}" class="btn btn-success w-100 mb-2">
+              <a
+                href="{% url 'notifications:create_kpi' %}"
+                class="btn btn-success w-100 mb-2"
+              >
                 <i class="material-symbols-rounded me-2">add</i>Crear KPI
               </a>
             </div>
             <div class="col-md-6 col-xl-3">
-              <a href="{% url 'notifications:create_alert_rule' %}" class="btn btn-warning w-100 mb-2">
-                <i class="material-symbols-rounded me-2">notification_add</i>Nueva Regla de Alerta
+              <a
+                href="{% url 'notifications:create_alert_rule' %}"
+                class="btn btn-warning w-100 mb-2"
+              >
+                <i class="material-symbols-rounded me-2">notification_add</i
+                >Nueva Regla de Alerta
               </a>
             </div>
             <div class="col-md-6 col-xl-3">
-              <a href="{% url 'notifications:list_kpis' %}" class="btn btn-info w-100 mb-2">
+              <a
+                href="{% url 'notifications:list_kpis' %}"
+                class="btn btn-info w-100 mb-2"
+              >
                 <i class="material-symbols-rounded me-2">analytics</i>Ver KPIs
               </a>
             </div>
             <div class="col-md-6 col-xl-3">
-              <a href="{% url 'notifications:list_alert_rules' %}" class="btn btn-secondary w-100 mb-2">
+              <a
+                href="{% url 'notifications:list_alert_rules' %}"
+                class="btn btn-secondary w-100 mb-2"
+              >
                 <i class="material-symbols-rounded me-2">rule</i>Ver Reglas
               </a>
+            </div>
+            <!-- Botón para ejecutar alertas -->
+            <div class="col-md-6 col-xl-3">
+              <button id="run-alerts-btn" class="btn btn-primary w-100 mb-2">
+                <i class="material-symbols-rounded me-2">play_arrow</i> Ejecutar Alertas
+              </button>
             </div>
           </div>
         </div>
@@ -113,82 +138,145 @@
         </div>
         <div class="card-body px-0 pb-2">
           {% if alerts %}
-            <div class="table-responsive">
-              <table class="table align-items-center mb-0">
-                <thead>
-                  <tr>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">KPI</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2">Valor</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2">Severidad</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2">Estado</th>
-                    <th class="text-center text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for alert in alerts %}
-                  <tr>
-                    <td>
-                      <div class="d-flex px-2 py-1">
-                        <div class="d-flex flex-column justify-content-center">
-                          <h6 class="mb-0 text-sm">{{ alert.alert_rule.kpi.name }}</h6>
-                          <p class="text-xs text-secondary mb-0">{{ alert.triggered_at|date:"d/m/Y H:i" }}</p>
-                        </div>
+          <div class="table-responsive">
+            <table class="table align-items-center mb-0">
+              <thead>
+                <tr>
+                  <th
+                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7"
+                  >
+                    KPI
+                  </th>
+                  <th
+                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2"
+                  >
+                    Valor
+                  </th>
+                  <th
+                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2"
+                  >
+                    Severidad
+                  </th>
+                  <th
+                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-2"
+                  >
+                    Estado
+                  </th>
+                  <th
+                    class="text-center text-uppercase text-secondary text-xxs font-weight-bolder opacity-7"
+                  >
+                    Acciones
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for alert in alerts %}
+                <tr>
+                  <td>
+                    <div class="d-flex px-2 py-1">
+                      <div class="d-flex flex-column justify-content-center">
+                        <h6 class="mb-0 text-sm">
+                          {{ alert.alert_rule.kpi.name }}
+                        </h6>
+                        <p class="text-xs text-secondary mb-0">
+                          {{ alert.triggered_at|date:"d/m/Y H:i" }}
+                        </p>
                       </div>
-                    </td>
-                    <td>
-                      <p class="text-xs font-weight-bold mb-0">{{ alert.current_value }}</p>
-                      <p class="text-xs text-secondary mb-0">Umbral: {{ alert.threshold_value }}</p>
-                    </td>
-                    <td>
-                      {% if alert.alert_rule.severity == 'critical' %}
-                        <span class="badge badge-sm bg-gradient-danger">{{ alert.alert_rule.get_severity_display }}</span>
-                      {% elif alert.alert_rule.severity == 'high' %}
-                        <span class="badge badge-sm bg-gradient-warning">{{ alert.alert_rule.get_severity_display }}</span>
-                      {% elif alert.alert_rule.severity == 'medium' %}
-                        <span class="badge badge-sm bg-gradient-info">{{ alert.alert_rule.get_severity_display }}</span>
-                      {% else %}
-                        <span class="badge badge-sm bg-gradient-secondary">{{ alert.alert_rule.get_severity_display }}</span>
-                      {% endif %}
-                    </td>
-                    <td>
-                      {% if alert.status == 'new' %}
-                        <span class="badge badge-sm bg-gradient-warning">{{ alert.get_status_display }}</span>
-                      {% elif alert.status == 'acknowledged' %}
-                        <span class="badge badge-sm bg-gradient-info">{{ alert.get_status_display }}</span>
-                      {% elif alert.status == 'resolved' %}
-                        <span class="badge badge-sm bg-gradient-success">{{ alert.get_status_display }}</span>
-                      {% else %}
-                        <span class="badge badge-sm bg-gradient-secondary">{{ alert.get_status_display }}</span>
-                      {% endif %}
-                    </td>
-                    <td class="align-middle text-center">
-                      {% if alert.status == 'new' %}
-                        <form method="post" action="{% url 'notifications:acknowledge_alert' alert.id %}" class="d-inline">
-                          {% csrf_token %}
-                          <button type="submit" class="btn btn-link text-info p-0 mb-0">
-                            <i class="material-symbols-rounded text-sm">check_circle</i>
-                          </button>
-                        </form>
-                      {% endif %}
-                      {% if alert.status in 'new,acknowledged' %}
-                        <form method="post" action="{% url 'notifications:resolve_alert' alert.id %}" class="d-inline">
-                          {% csrf_token %}
-                          <button type="submit" class="btn btn-link text-success p-0 mb-0">
-                            <i class="material-symbols-rounded text-sm">task_alt</i>
-                          </button>
-                        </form>
-                      {% endif %}
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
+                    </div>
+                  </td>
+                  <td>
+                    <p class="text-xs font-weight-bold mb-0">
+                      {{ alert.current_value }}
+                    </p>
+                    <p class="text-xs text-secondary mb-0">
+                      Umbral: {{ alert.threshold_value }}
+                    </p>
+                  </td>
+                  <td>
+                    {% if alert.alert_rule.severity == 'critical' %}
+                    <span class="badge badge-sm bg-gradient-danger"
+                      >{{ alert.alert_rule.get_severity_display }}</span
+                    >
+                    {% elif alert.alert_rule.severity == 'high' %}
+                    <span class="badge badge-sm bg-gradient-warning"
+                      >{{ alert.alert_rule.get_severity_display }}</span
+                    >
+                    {% elif alert.alert_rule.severity == 'medium' %}
+                    <span class="badge badge-sm bg-gradient-info"
+                      >{{ alert.alert_rule.get_severity_display }}</span
+                    >
+                    {% else %}
+                    <span class="badge badge-sm bg-gradient-secondary"
+                      >{{ alert.alert_rule.get_severity_display }}</span
+                    >
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if alert.status == 'new' %}
+                    <span class="badge badge-sm bg-gradient-warning"
+                      >{{ alert.get_status_display }}</span
+                    >
+                    {% elif alert.status == 'acknowledged' %}
+                    <span class="badge badge-sm bg-gradient-info"
+                      >{{ alert.get_status_display }}</span
+                    >
+                    {% elif alert.status == 'resolved' %}
+                    <span class="badge badge-sm bg-gradient-success"
+                      >{{ alert.get_status_display }}</span
+                    >
+                    {% else %}
+                    <span class="badge badge-sm bg-gradient-secondary"
+                      >{{ alert.get_status_display }}</span
+                    >
+                    {% endif %}
+                  </td>
+                  <td class="align-middle text-center">
+                    {% if alert.status == 'new' %}
+                    <form
+                      method="post"
+                      action="{% url 'notifications:acknowledge_alert' alert.id %}"
+                      class="d-inline"
+                    >
+                      {% csrf_token %}
+                      <button
+                        type="submit"
+                        class="btn btn-link text-info p-0 mb-0"
+                      >
+                        <i class="material-symbols-rounded text-sm"
+                          >check_circle</i
+                        >
+                      </button>
+                    </form>
+                    {% endif %} {% if alert.status in 'new,acknowledged' %}
+                    <form
+                      method="post"
+                      action="{% url 'notifications:resolve_alert' alert.id %}"
+                      class="d-inline"
+                    >
+                      {% csrf_token %}
+                      <button
+                        type="submit"
+                        class="btn btn-link text-success p-0 mb-0"
+                      >
+                        <i class="material-symbols-rounded text-sm">task_alt</i>
+                      </button>
+                    </form>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
           {% else %}
-            <div class="text-center py-4">
-              <i class="material-symbols-rounded text-muted" style="font-size: 48px;">notifications_none</i>
-              <p class="text-muted">No hay alertas recientes</p>
-            </div>
+          <div class="text-center py-4">
+            <i
+              class="material-symbols-rounded text-muted"
+              style="font-size: 48px"
+              >notifications_none</i
+            >
+            <p class="text-muted">No hay alertas recientes</p>
+          </div>
           {% endif %}
         </div>
       </div>
@@ -201,33 +289,89 @@
           <h6>KPIs Configurados</h6>
         </div>
         <div class="card-body">
-          {% if user_kpis %}
-            {% for kpi in user_kpis %}
-            <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
-              <div>
-                <h6 class="mb-0 text-sm">{{ kpi.name }}</h6>
-                <p class="text-xs text-secondary mb-0">{{ kpi.get_metric_type_display }} - {{ kpi.column_name }}</p>
-              </div>
-              <div>
-                <a href="{% url 'notifications:test_kpi' kpi.id %}" class="btn btn-link text-info p-0 mb-0" title="Probar KPI">
-                  <i class="material-symbols-rounded text-sm">play_arrow</i>
-                </a>
-                <a href="{% url 'notifications:create_alert_rule_for_kpi' kpi.id %}" class="btn btn-link text-warning p-0 mb-0" title="Crear alerta">
-                  <i class="material-symbols-rounded text-sm">add_alert</i>
-                </a>
-              </div>
+          {% if user_kpis %} {% for kpi in user_kpis %}
+          <div
+            class="d-flex justify-content-between align-items-center py-2 border-bottom"
+          >
+            <div>
+              <h6 class="mb-0 text-sm">{{ kpi.name }}</h6>
+              <p class="text-xs text-secondary mb-0">
+                {{ kpi.get_metric_type_display }} - {{ kpi.column_name }}
+              </p>
             </div>
-            {% endfor %}
-          {% else %}
-            <div class="text-center py-4">
-              <i class="material-symbols-rounded text-muted" style="font-size: 36px;">analytics</i>
-              <p class="text-muted text-sm">No hay KPIs configurados</p>
-              <a href="{% url 'notifications:create_kpi' %}" class="btn btn-sm btn-success">Crear primer KPI</a>
+            <div>
+              <a
+                href="{% url 'notifications:test_kpi' kpi.id %}"
+                class="btn btn-link text-info p-0 mb-0"
+                title="Probar KPI"
+              >
+                <i class="material-symbols-rounded text-sm">play_arrow</i>
+              </a>
+              <a
+                href="{% url 'notifications:create_alert_rule_for_kpi' kpi.id %}"
+                class="btn btn-link text-warning p-0 mb-0"
+                title="Crear alerta"
+              >
+                <i class="material-symbols-rounded text-sm">add_alert</i>
+              </a>
             </div>
+          </div>
+          {% endfor %} {% else %}
+          <div class="text-center py-4">
+            <i
+              class="material-symbols-rounded text-muted"
+              style="font-size: 36px"
+              >analytics</i
+            >
+            <p class="text-muted text-sm">No hay KPIs configurados</p>
+            <a
+              href="{% url 'notifications:create_kpi' %}"
+              class="btn btn-sm btn-success"
+              >Crear primer KPI</a
+            >
+          </div>
           {% endif %}
         </div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- Script para manejar el botón de ejecución -->
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const btn = document.getElementById('run-alerts-btn');
+
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="material-symbols-rounded me-2">hourglass_top</i> Ejecutando...';
+
+    fetch("{% url 'notifications:run_alerts' %}", {
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': '{{ csrf_token }}',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    })
+    .then(response => response.json())
+    .then(data => {
+      if (data.status === 'ok') {
+        alert(`Se ejecutaron ${data.triggered_count} alertas.`);
+        location.reload();  // recarga para actualizar el listado de alertas
+      } else {
+        alert(`Error: ${data.message}`);
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      alert('Ocurrió un error al ejecutar las alertas.');
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="material-symbols-rounded me-2">play_arrow</i> Ejecutar Alertas';
+    });
+  });
+});
+</script>
 {% endblock %}

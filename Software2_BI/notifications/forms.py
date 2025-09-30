@@ -6,11 +6,12 @@ from .models import KPI, AlertRule
 class KPIForm(forms.ModelForm):
     class Meta:
         model = KPI
-        fields = ['name', 'description', 'data_source', 'metric_type', 'column_name']
+        fields = ['name', 'description', 'data_source', 'table_name', 'metric_type', 'column_name']
         widgets = {
             'name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Ej: Total Ventas Mensuales'}),
             'description': forms.Textarea(attrs={'class': 'form-control', 'rows': 3, 'placeholder': 'Describe qué mide este KPI...'}),
             'data_source': forms.Select(attrs={'class': 'form-control'}),
+            'table_name': forms.Select(attrs={'class': 'form-control'}),
             'metric_type': forms.Select(attrs={'class': 'form-control'}),
             'column_name': forms.Select(attrs={'class': 'form-control'}),
         }
@@ -20,18 +21,15 @@ class KPIForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         
         if user:
-            # Solo mostrar fuentes de datos del usuario
             self.fields['data_source'].queryset = DataSource.objects.filter(
                 owner=user,
                 internal_schema__isnull=False
             ).exclude(internal_schema='')
         
-        # Inicialmente vacío, se llena via AJAX
         self.fields['column_name'].widget = forms.Select(attrs={'class': 'form-control'})
         self.fields['column_name'].choices = [('', 'Selecciona primero una fuente de datos')]
 
 class AlertRuleForm(forms.ModelForm):
-    # Campo adicional para emails separados por comas
     email_recipients_text = forms.CharField(
         required=False,
         widget=forms.TextInput(attrs={
@@ -63,14 +61,12 @@ class AlertRuleForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         
         if user:
-            # Solo mostrar KPIs del usuario
             self.fields['kpi'].queryset = KPI.objects.filter(owner=user, is_active=True)
         
         if initial_kpi:
             self.fields['kpi'].initial = initial_kpi
             self.fields['kpi'].widget.attrs['readonly'] = True
         
-        # Pre-llenar con el email del usuario si está vacío
         if not self.instance.pk and user:
             self.initial['email_recipients_text'] = user.email
     
@@ -82,7 +78,6 @@ class AlertRuleForm(forms.ModelForm):
         
         emails = [email.strip() for email in emails_text.split(',') if email.strip()]
         
-        # Validar formato de emails
         for email in emails:
             if not forms.EmailField().clean(email):
                 raise forms.ValidationError(f'Email inválido: {email}')
@@ -92,7 +87,6 @@ class AlertRuleForm(forms.ModelForm):
     def save(self, commit=True):
         instance = super().save(commit=False)
         
-        # Guardar la lista de emails
         emails = self.cleaned_data.get('email_recipients_text', [])
         instance.email_recipients = emails
         

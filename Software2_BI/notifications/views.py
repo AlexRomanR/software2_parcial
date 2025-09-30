@@ -10,6 +10,8 @@ from ingestion.services import get_schema_info
 from .models import KPI, AlertRule, Alert
 from .services import AlertManager, KPICalculator
 from .forms import KPIForm, AlertRuleForm
+from django.utils import timezone
+from notifications.services import AlertEvaluator
 
 @login_required
 def alerts_dashboard(request):
@@ -62,26 +64,84 @@ def create_alert_rule(request, kpi_id=None):
     return render(request, 'notifications/create_alert_rule.html', {'form': form, 'kpi': kpi})
 
 @login_required
-def get_columns_ajax(request):
-    """AJAX: Obtener columnas de una fuente de datos"""
+def get_tables_ajax(request):
+    """AJAX: Obtener tablas de una fuente de datos"""
     data_source_id = request.GET.get('data_source_id')
     if not data_source_id:
+        return JsonResponse({'tables': []})
+    
+    try:
+        data_source = DataSource.objects.get(id=data_source_id, owner=request.user)
+        schema = data_source.internal_schema
+        
+        if not schema:
+            return JsonResponse({'tables': []})
+        
+        # Obtener todas las tablas del esquema
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = %s AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """, [schema])
+            
+            tables = [row[0] for row in cursor.fetchall()]
+        
+        return JsonResponse({'tables': tables})
+        
+    except DataSource.DoesNotExist:
+        return JsonResponse({'tables': [], 'error': 'Fuente de datos no encontrada'})
+    except Exception as e:
+        return JsonResponse({'tables': [], 'error': str(e)})
+
+@login_required
+def get_columns_by_table_ajax(request):
+    """AJAX: Obtener columnas numéricas de una tabla específica"""
+    data_source_id = request.GET.get('data_source_id')
+    table_name = request.GET.get('table_name')
+    
+    if not data_source_id or not table_name:
         return JsonResponse({'columns': []})
     
     try:
         data_source = DataSource.objects.get(id=data_source_id, owner=request.user)
-        schema_info = get_schema_info(data_source.internal_schema)
+        schema = data_source.internal_schema
         
-        # Obtener todas las columnas de todas las tablas
-        columns = []
-        for table, info in schema_info.items():
-            for col in info['columns']:
-                columns.append(col)
+        if not schema:
+            return JsonResponse({'columns': []})
         
-        return JsonResponse({'columns': list(set(columns))})  # Eliminar duplicados
+        # Solo obtener columnas numéricas de la tabla específica
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_schema = %s 
+                  AND table_name = %s
+                  AND data_type IN (
+                      'integer', 'bigint', 'smallint', 'numeric', 
+                      'decimal', 'real', 'double precision', 'money'
+                  )
+                ORDER BY ordinal_position
+            """, [schema, table_name])
+            
+            columns = [{'name': row[0], 'type': row[1]} for row in cursor.fetchall()]
+        
+        return JsonResponse({
+            'columns': [col['name'] for col in columns],
+            'column_details': columns
+        })
+        
     except DataSource.DoesNotExist:
-        return JsonResponse({'columns': []})
+        return JsonResponse({'columns': [], 'error': 'Fuente de datos no encontrada'})
+    except Exception as e:
+        return JsonResponse({'columns': [], 'error': str(e)})
 
+@login_required
+def get_columns_ajax(request):
+    """AJAX: Mantener por compatibilidad - redirige a la nueva función"""
+    return get_columns_by_table_ajax(request)
+    
 @require_POST
 @login_required
 def acknowledge_alert(request, alert_id):
@@ -183,3 +243,15 @@ def delete_alert(request, alert_id):
     
     messages.success(request, 'Alerta descartada exitosamente.')
     return redirect('notifications:dashboard')
+
+@require_POST
+def run_alerts(request):
+    """
+    Ejecuta la verificación de alertas activas y devuelve el número de alertas disparadas.
+    """
+    try:
+        triggered_count = AlertEvaluator.check_all_active_rules()  # devuelve un int
+        return JsonResponse({'status': 'ok', 'triggered_count': triggered_count})
+    except Exception as e:
+        # solo devolvemos el error al front
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
