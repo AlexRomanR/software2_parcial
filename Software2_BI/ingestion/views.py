@@ -37,8 +37,11 @@ from django.http import JsonResponse
 import json
 import re
 
+import pandas as pd
 from .models import DataSource
 from .services import get_schema_info, ejecutar_sql_para_chart
+import io
+from openpyxl.utils import get_column_letter
 @login_required
 def upload_dataset_view(request):
     if request.method == "POST" and request.FILES.get("file"):
@@ -702,3 +705,49 @@ def dragdrop_run_api(request):
 
     except Exception as e:
         return JsonResponse({"success": False, "error": str(e)}, status=500)
+    
+
+
+def descargar_excel_view(request, schema):
+    """Genera un archivo Excel con formato correcto para datetime y booleanos."""
+    info = get_schema_info(schema)
+
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine="openpyxl", datetime_format="YYYY-MM-DD HH:MM:SS")
+
+    for table, data in info.items():
+        df = pd.DataFrame(data["preview"], columns=data["columns"])
+
+        if df.empty:
+            df = pd.DataFrame(columns=data["columns"])
+
+        # Convertir timestamps con zona horaria → naive
+        for col in df.select_dtypes(include=["datetimetz"]).columns:
+            df[col] = df[col].dt.tz_localize(None)
+
+        # Convertir booleanos a "Sí"/"No"
+        for col in df.select_dtypes(include=["bool"]).columns:
+            df[col] = df[col].map({True: "Sí", False: "No"})
+
+        # Convertir objetos raros a texto
+        for col in df.select_dtypes(include=["object"]).columns:
+            df[col] = df[col].astype(str)
+
+        # Guardar en la hoja de Excel
+        df.to_excel(writer, sheet_name=table[:31], index=False)
+
+        # Ajustar ancho de columnas
+        ws = writer.sheets[table[:31]]
+        for i, col in enumerate(df.columns, start=1):
+            max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+            ws.column_dimensions[get_column_letter(i)].width = min(max_len, 50)
+
+    writer.close()
+    output.seek(0)
+
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{schema}.xlsx"'
+    return response   

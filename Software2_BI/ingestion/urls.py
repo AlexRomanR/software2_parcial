@@ -5,7 +5,7 @@ from .views import (
     delete_source, download_schema, prueba_chat_view, enviar_email_view,
     # Nuevas vistas para diagramas
     dashboard_view, chat_integrado_view, guardar_diagrama_view, 
-    listar_diagramas_view, eliminar_diagrama_view, actualizar_diagrama_view, analyze_chart_view, drag_drop_view, dragdrop_run_api, dragdrop_schema_api
+    listar_diagramas_view, eliminar_diagrama_view, actualizar_diagrama_view, analyze_chart_view, drag_drop_view, dragdrop_run_api, dragdrop_schema_api, descargar_excel_view
 )
 from  .api_views import (api_list_datasets, diagramas_por_data_source)
 
@@ -42,6 +42,7 @@ urlpatterns = [
         diagramas_por_data_source,
         name="diagramas_por_data_source",
     ),
+    path("descargar/<str:schema>/", descargar_excel_view, name="descargar_excel"),
 
 ]
 
