@@ -99,7 +99,8 @@ DATABASES = {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'software2_DB',       # Nombre de la base que creaste
         'USER': 'postgres',        # Usuario de tu PostgreSQL
-        'PASSWORD': 'openpg', # Contraseña del usuario
+        # 'PASSWORD': 'openpg', # Contraseña del usuario
+        'PASSWORD': '11310598', # Contraseña del usuario
         'HOST': 'localhost',       # Si está en tu máquina local
         'PORT': '5433',            # Puerto por defecto de PostgreSQL
     }
@@ -169,4 +170,3 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
 CSRF_COOKIE_SECURE = False
 CSRF_COOKIE_HTTPONLY = False
-

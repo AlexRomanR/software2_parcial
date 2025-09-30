@@ -19,6 +19,7 @@ class KPI(models.Model):
     name = models.CharField(max_length=200, verbose_name="Nombre del KPI")
     description = models.TextField(blank=True, verbose_name="Descripción")
     data_source = models.ForeignKey(DataSource, on_delete=models.CASCADE, verbose_name="Fuente de datos")
+    table_name = models.CharField(max_length=100, verbose_name="Tabla específica", default='default_table', help_text="Tabla dentro del esquema de la fuente de datos")
     metric_type = models.CharField(max_length=10, choices=METRIC_TYPES, verbose_name="Tipo de métrica")
     column_name = models.CharField(max_length=100, verbose_name="Columna a medir")
     filter_conditions = models.JSONField(default=dict, blank=True, verbose_name="Condiciones de filtro")

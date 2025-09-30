@@ -14,26 +14,60 @@ class KPICalculator:
     """Servicio para calcular valores de KPIs"""
     
     @staticmethod
+    def validate_column_for_kpi(kpi: KPI) -> bool:
+        """Valida que la columna sea numérica y exista"""
+        try:
+            schema = kpi.data_source.internal_schema
+            table = kpi.table_name
+            column = kpi.column_name
+            
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT data_type 
+                    FROM information_schema.columns 
+                    WHERE table_schema = %s 
+                      AND table_name = %s 
+                      AND column_name = %s
+                """, [schema, table, column])
+                
+                result = cursor.fetchone()
+                if not result:
+                    raise ValueError(f"La columna '{column}' no existe en la tabla '{table}'")
+                
+                data_type = result[0]
+                numeric_types = {
+                    'integer', 'bigint', 'smallint', 'numeric', 
+                    'decimal', 'real', 'double precision', 'money'
+                }
+                
+                if data_type not in numeric_types:
+                    raise ValueError(f"La columna '{column}' no es numérica (tipo: {data_type})")
+                
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error validando columna para KPI {kpi.name}: {str(e)}")
+            raise
+    
+    @staticmethod
     def calculate_kpi_value(kpi: KPI) -> Decimal:
         """Calcula el valor actual de un KPI"""
         try:
+            # Validar primero
+            KPICalculator.validate_column_for_kpi(kpi)
+            
             schema = kpi.data_source.internal_schema
-            table = kpi.data_source.internal_table
-            
-            if not schema or not table:
-                raise ValueError(f"KPI {kpi.name}: datos no disponibles")
-            
-            # Construir la consulta SQL según el tipo de métrica
+            table = kpi.table_name
             column = kpi.column_name
             metric_type = kpi.metric_type
             
             # Funciones SQL según el tipo de métrica
             sql_functions = {
-                'sum': f'SUM({column})',
-                'avg': f'AVG({column})',
-                'count': f'COUNT({column})',
-                'max': f'MAX({column})',
-                'min': f'MIN({column})',
+                'sum': f'SUM("{column}")',
+                'avg': f'AVG("{column}")',
+                'count': f'COUNT("{column}")',  # COUNT funciona con cualquier tipo
+                'max': f'MAX("{column}")',
+                'min': f'MIN("{column}")',
             }
             
             if metric_type not in sql_functions:
@@ -46,24 +80,72 @@ class KPICalculator:
             where_conditions = []
             if kpi.filter_conditions:
                 for field, value in kpi.filter_conditions.items():
+                    # Escapar valores para prevenir SQL injection
                     if isinstance(value, str):
-                        where_conditions.append(f"{field} = '{value}'")
+                        where_conditions.append(f'"{field}" = %s')
                     else:
-                        where_conditions.append(f"{field} = {value}")
+                        where_conditions.append(f'"{field}" = %s')
             
+            query_params = []
             if where_conditions:
                 base_query += " WHERE " + " AND ".join(where_conditions)
+                query_params = list(kpi.filter_conditions.values())
             
             # Ejecutar consulta
             with connection.cursor() as cursor:
-                cursor.execute(base_query)
+                cursor.execute(base_query, query_params)
                 result = cursor.fetchone()
-                return Decimal(str(result[0] or 0))
+                
+                # Manejar valores NULL
+                value = result[0] if result and result[0] is not None else 0
+                return Decimal(str(value))
                 
         except Exception as e:
             logger.error(f"Error calculando KPI {kpi.name}: {str(e)}")
             raise
-
+    
+    @staticmethod
+    def preview_kpi_query(kpi: KPI, limit: int = 5) -> dict:
+        """Genera una vista previa de la consulta del KPI para debugging"""
+        try:
+            schema = kpi.data_source.internal_schema
+            table = kpi.data_source.internal_table
+            column = kpi.column_name
+            
+            # Consulta de muestra
+            sample_query = f'SELECT "{column}" FROM "{schema}"."{table}" WHERE "{column}" IS NOT NULL LIMIT {limit}'
+            
+            with connection.cursor() as cursor:
+                cursor.execute(sample_query)
+                sample_data = [row[0] for row in cursor.fetchall()]
+                
+                # Estadísticas básicas
+                stats_query = f'''
+                    SELECT 
+                        COUNT("{column}") as total_records,
+                        COUNT(CASE WHEN "{column}" IS NULL THEN 1 END) as null_values,
+                        MIN("{column}") as min_value,
+                        MAX("{column}") as max_value,
+                        AVG("{column}") as avg_value
+                    FROM "{schema}"."{table}"
+                '''
+                cursor.execute(stats_query)
+                stats = cursor.fetchone()
+                
+                return {
+                    'sample_values': sample_data,
+                    'statistics': {
+                        'total_records': stats[0],
+                        'null_values': stats[1],
+                        'min_value': float(stats[2]) if stats[2] else None,
+                        'max_value': float(stats[3]) if stats[3] else None,
+                        'avg_value': float(stats[4]) if stats[4] else None,
+                    }
+                }
+                
+        except Exception as e:
+            return {'error': str(e)}
+        
 class AlertEvaluator:
     """Servicio para evaluar reglas de alertas"""
     
@@ -108,12 +190,10 @@ class AlertEvaluator:
         ).first()
         
         if existing_alert:
-            # Actualizar valor actual
             existing_alert.current_value = current_value
             existing_alert.save()
             return existing_alert
         
-        # Crear nueva alerta
         message = (f"KPI '{alert_rule.kpi.name}' ha superado el umbral. "
                   f"Valor actual: {current_value}, Umbral: {threshold_value}")
         
