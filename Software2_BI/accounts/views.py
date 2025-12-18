@@ -1,8 +1,10 @@
 # accounts/views.py
-from django.shortcuts import render, redirect
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.shortcuts import redirect, render
+
 from .forms import SignUpForm
+
 
 def signup_view(request):
     if request.method == "POST":
@@ -14,6 +16,7 @@ def signup_view(request):
     else:
         form = SignUpForm()
     return render(request, "registration/signup.html", {"form": form})
+
 
 @login_required
 def dashboard_view(request):

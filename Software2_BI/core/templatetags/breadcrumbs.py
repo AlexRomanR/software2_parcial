@@ -3,11 +3,13 @@ from django.urls import reverse
 
 register = template.Library()
 
+
 def _route_key(context):
-    match = context['request'].resolver_match
+    match = context["request"].resolver_match
     if not match:
         return ""
     return f"{match.namespace}:{match.url_name}" if match.namespace else match.url_name
+
 
 def _url_from_target(target, view_kwargs):
     """
@@ -30,6 +32,7 @@ def _url_from_target(target, view_kwargs):
         kw = {}
     return reverse(route_name, kwargs=kw)
 
+
 # Mapa declarativo. Puedes usar {schema} y {table} en los labels.
 BREADCRUMB_MAP = {
     "prep:schema_index": [
@@ -49,9 +52,10 @@ BREADCRUMB_MAP = {
     ],
 }
 
+
 @register.inclusion_tag("includes/breadcrumbs.html", takes_context=True)
 def show_breadcrumbs(context):
-    match = context['request'].resolver_match
+    match = context["request"].resolver_match
     key = _route_key(context)
     kwargs = match.kwargs if match else {}
     spec = BREADCRUMB_MAP.get(key)

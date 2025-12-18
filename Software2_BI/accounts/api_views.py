@@ -1,10 +1,12 @@
 # accounts/api_views.py
 import json
+
+from django.contrib.auth import authenticate, get_user_model
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth import authenticate, get_user_model
 
 User = get_user_model()
+
 
 def _extract_credentials(request):
     """
@@ -41,18 +43,24 @@ def _extract_credentials(request):
 
     return username, password
 
+
 @csrf_exempt
 def login_api(request):
     if request.method != "POST":
-        return JsonResponse({"status": "error", "message": "Método no permitido"}, status=405)
+        return JsonResponse(
+            {"status": "error", "message": "Método no permitido"}, status=405
+        )
 
     username, password = _extract_credentials(request)
 
     if not username or not password:
-        return JsonResponse({
-            "status": "error",
-            "message": "Faltan credenciales. Envía 'username' y 'password' en JSON o form-data."
-        }, status=400)
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": "Faltan credenciales. Envía 'username' y 'password' en JSON o form-data.",
+            },
+            status=400,
+        )
 
     # 1) Intento normal por username
     user = authenticate(username=username, password=password)
@@ -67,11 +75,16 @@ def login_api(request):
             pass
 
     if user is None:
-        return JsonResponse({"status": "error", "message": "Credenciales inválidas"}, status=401)
+        return JsonResponse(
+            {"status": "error", "message": "Credenciales inválidas"}, status=401
+        )
 
-    return JsonResponse({
-        "status": "ok",
-        "user": getattr(user, "username", None),
-        "email": getattr(user, "email", None),
-        "id": user.pk
-    }, status=200)
+    return JsonResponse(
+        {
+            "status": "ok",
+            "user": getattr(user, "username", None),
+            "email": getattr(user, "email", None),
+            "id": user.pk,
+        },
+        status=200,
+    )

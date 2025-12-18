@@ -6,13 +6,18 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('notifications', '0001_initial'),
+        ("notifications", "0001_initial"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='kpi',
-            name='table_name',
-            field=models.CharField(default='default_table', help_text='Tabla dentro del esquema de la fuente de datos', max_length=100, verbose_name='Tabla específica'),
+            model_name="kpi",
+            name="table_name",
+            field=models.CharField(
+                default="default_table",
+                help_text="Tabla dentro del esquema de la fuente de datos",
+                max_length=100,
+                verbose_name="Tabla específica",
+            ),
         ),
     ]
